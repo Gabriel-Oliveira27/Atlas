@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Atlas Base",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    // Build incremental DESLIGADO de propósito.
+    //
+    // `tsBuildInfoFile` num tsconfig compartilhado resolve relativo ao
+    // arquivo de config, não ao projeto que o estende — então todos os
+    // packages e a API acabavam gravando no MESMO cache. Cada build
+    // seguinte via o cache do vizinho, concluía "já emiti tudo" e não
+    // gerava saída, produzindo MODULE_NOT_FOUND só em tempo de execução.
+    //
+    // Os builds levam segundos; o ganho do incremental não paga o risco
+    // de uma saída silenciosamente incompleta.
+    "incremental": false
+  },
+  "exclude": ["node_modules", "dist", "build", ".next"]
+}

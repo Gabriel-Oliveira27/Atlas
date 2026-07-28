@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Atlas Library",
+  "extends": "./base.json",
+  "compilerOptions": {
+    // CommonJS porque o consumidor mais restritivo é a API (NestJS
+    // compila para CJS e faz `require` dos packages). O Next.js e o
+    // bundler do Expo consomem CJS sem problema; o contrário — ESM puro
+    // exigido por um `require` — quebraria em tempo de execução.
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "isolatedModules": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
+}

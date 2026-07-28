@@ -1,0 +1,204 @@
+##################################################################
+# Atlas — stack de desenvolvimento local
+#
+# Sobe com:
+#   pnpm docker:up
+# ou
+#   docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env up -d
+#
+# Portas no host:
+#   5433  Postgres (5433 evita conflito com um PostgreSQL já
+#         instalado no Windows, que costuma ocupar a 5432)
+#   6379  Redis
+#   5678  n8n
+#   5050  pgAdmin
+#   9000  MinIO (API S3)   9001  MinIO (console)
+#
+# A API roda no HOST (não em container) durante o desenvolvimento e
+# acessa o Postgres em localhost:5433. Os containers acessam a API
+# em http://host.docker.internal:3333.
+##################################################################
+
+name: atlas
+
+services:
+  # ─────────────────────────────────────────────────────────────
+  # PostgreSQL — BANCO PRINCIPAL do sistema.
+  # Dedicado ao Atlas; o init script cria os bancos `atlas`
+  # (aplicação), `atlas_shadow` (Prisma migrate) e `n8n`.
+  # ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: atlas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-atlas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-atlas_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-atlas}
+      # Locale pt-BR para ordenação/collation coerentes com os dados
+      POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+      TZ: ${TZ:-America/Sao_Paulo}
+    ports:
+      - '${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # `pg_isready` só confirma que aceita conexão; a query garante
+      # que o initdb terminou e o banco da aplicação existe.
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-atlas} -d ${POSTGRES_DB:-atlas} -q']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - atlas-net
+
+  # ─────────────────────────────────────────────────────────────
+  # Redis — filas BullMQ (sincronização, IA, notificações) e
+  # armazenamento do rate limit.
+  # ─────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: atlas-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - atlas-net
+
+  # ─────────────────────────────────────────────────────────────
+  # n8n — orquestrador de workflows (relatórios semanais, PDFs,
+  # análise de hidratação, gatilhos de sincronização, agentes IA).
+  # Persistência em PostgreSQL (banco `n8n`) em vez do SQLite
+  # padrão: sobrevive a recriação do container e permite backup
+  # junto com o resto do sistema.
+  # ─────────────────────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: atlas-n8n
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-atlas}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-atlas_dev_password}
+      DB_POSTGRESDB_SCHEMA: public
+
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: ${TZ:-America/Sao_Paulo}
+      TZ: ${TZ:-America/Sao_Paulo}
+
+      # Autenticação da interface do n8n
+      N8N_BASIC_AUTH_ACTIVE: 'true'
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-atlas_n8n_password}
+
+      # Chave usada pelo n8n para criptografar credenciais salvas.
+      # Se mudar, todas as credenciais existentes ficam ilegíveis.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-atlas-n8n-encryption-key-change-me}
+
+      # http://localhost:5678 é origem "insegura"; sem isto o cookie
+      # de sessão não é aceito em desenvolvimento.
+      N8N_SECURE_COOKIE: 'false'
+      N8N_DIAGNOSTICS_ENABLED: 'false'
+      N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
+      N8N_RUNNERS_ENABLED: 'true'
+      NODE_FUNCTION_ALLOW_EXTERNAL: 'axios,dayjs'
+
+      # Como os workflows alcançam a API rodando no host Windows
+      ATLAS_API_URL: ${ATLAS_API_URL:-http://host.docker.internal:3333/api}
+      ATLAS_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:-troque-este-segredo-de-webhook}
+    ports:
+      - '${N8N_PORT:-5678}:5678'
+    volumes:
+      - n8n_data:/home/node/.n8n
+      # Workflows versionados no repositório, disponíveis para importar
+      - ../n8n/workflows:/workflows:ro
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    networks:
+      - atlas-net
+
+  # ─────────────────────────────────────────────────────────────
+  # pgAdmin — inspeção do banco pelo navegador.
+  # O servidor Atlas já vem pré-registrado (servers.json).
+  # ─────────────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: atlas-pgadmin
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@atlas.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-atlas_pgadmin_password}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+      PGADMIN_DISABLE_POSTFIX: 'True'
+    ports:
+      - '${PGADMIN_PORT:-5050}:80'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    networks:
+      - atlas-net
+
+  # ─────────────────────────────────────────────────────────────
+  # MinIO — storage S3 local. O Cloudinary é o storage oficial de
+  # mídias; o MinIO cobre desenvolvimento offline e backups locais
+  # (PDFs dos relatórios semanais, dumps).
+  # ─────────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: atlas-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-atlas}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-atlas_minio_password}
+    ports:
+      - '${MINIO_PORT:-9000}:9000'
+      - '${MINIO_CONSOLE_PORT:-9001}:9001'
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - atlas-net
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  n8n_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+  minio_data:
+    driver: local
+
+networks:
+  atlas-net:
+    driver: bridge

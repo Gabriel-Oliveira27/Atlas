@@ -1,0 +1,30 @@
+{
+  "name": "@atlas/admin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Atlas — painel administrativo (academias, catálogo, sincronização, workflows)",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "clean": "rimraf .next .turbo"
+  },
+  "dependencies": {
+    "@atlas/shared": "workspace:*",
+    "@atlas/validation": "workspace:*",
+    "@tanstack/react-query": "^5.62.2",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@atlas/config": "workspace:*",
+    "@types/node": "^22.9.0",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.1",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "name": "Atlas — Sincronização Agendada",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 3 * * *" },
+            { "field": "cronExpression", "expression": "0 18 * * *" }
+          ]
+        }
+      },
+      "id": "trigger-sync",
+      "name": "03:00 e 18:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-440, 300],
+      "notes": "Horários definidos na especificação. A API também agenda internamente (SyncScheduler); este workflow é a rede de segurança externa — se a API tiver reiniciado e perdido o agendamento, o n8n dispara mesmo assim."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ATLAS_API_URL }}/sync/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": { "timeout": 15000 }
+      },
+      "id": "verificar-status",
+      "name": "Verificar estado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-220, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.data.localAvailable && $json.data.cloudAvailable }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "ambos-disponiveis",
+      "name": "Os dois bancos estão no ar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [0, 300],
+      "notes": "Sincronizar com um dos lados fora só acumularia falhas no ChangeLog."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATLAS_API_URL }}/sync/trigger",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ direction: 'BIDIRECTIONAL', fullResync: false }) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": { "timeout": 300000 }
+      },
+      "id": "disparar-sync",
+      "name": "Disparar sincronização",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 200]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Registra o motivo do adiamento — vira trilha de auditoria quando\n// alguém perguntar por que a sincronização das 03:00 não rodou.\nconst s = $json.data ?? $json;\nreturn {\n  json: {\n    adiado: true,\n    motivo: !s.localAvailable\n      ? 'Banco local indisponível'\n      : 'Banco Neon indisponível',\n    pendentes: s.pendingChanges,\n    em: new Date().toISOString(),\n  },\n};"
+      },
+      "id": "registrar-adiamento",
+      "name": "Registrar adiamento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 400]
+    }
+  ],
+  "connections": {
+    "03:00 e 18:00": {
+      "main": [[{ "node": "Verificar estado", "type": "main", "index": 0 }]]
+    },
+    "Verificar estado": {
+      "main": [[{ "node": "Os dois bancos estão no ar?", "type": "main", "index": 0 }]]
+    },
+    "Os dois bancos estão no ar?": {
+      "main": [
+        [{ "node": "Disparar sincronização", "type": "main", "index": 0 }],
+        [{ "node": "Registrar adiamento", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "America/Sao_Paulo" },
+  "tags": [{ "name": "atlas" }, { "name": "sync" }]
+}

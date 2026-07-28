@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Atlas — Postgres Local",
+      "Group": "Atlas",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "atlas",
+      "Username": "atlas",
+      "SSLMode": "prefer",
+      "Comment": "Banco principal do Atlas (dentro da rede docker). Senha: veja infra/docker/.env"
+    }
+  }
+}

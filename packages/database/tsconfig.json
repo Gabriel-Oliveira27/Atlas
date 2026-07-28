@@ -1,0 +1,12 @@
+{
+  "extends": "@atlas/config/tsconfig/library.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  // O seed (`prisma/seed.ts`) roda via tsx, não entra no build da
+  // biblioteca — incluí-lo mudaria o rootDir e jogaria a saída para
+  // dist/src, quebrando o caminho de `main`.
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "prisma"]
+}

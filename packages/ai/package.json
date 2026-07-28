@@ -1,0 +1,33 @@
+{
+  "name": "@atlas/ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Camada de IA agnóstica de provedor (Claude, OpenAI, Gemini) — sem acoplamento com o resto do sistema",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "@atlas/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@atlas/config": "workspace:*",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "files": [
+    "dist"
+  ]
+}

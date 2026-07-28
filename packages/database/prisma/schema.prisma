@@ -1,0 +1,1471 @@
+// ============================================================================
+// ATLAS — Schema do banco de dados
+//
+// Um único schema serve aos DOIS bancos:
+//   • PostgreSQL local (Docker, porta 5433) — PRINCIPAL
+//   • Neon PostgreSQL (nuvem)               — SECUNDÁRIO / failover / backup
+//
+// O `datasource` abaixo aponta para o banco local. O cliente da nuvem é
+// criado em runtime com `new PrismaClient({ datasources: { db: { url } } })`
+// — ver `src/client.ts`. Manter um schema só é o que garante que a
+// reconciliação entre os dois bancos compare estruturas idênticas.
+//
+// ─── PADRÃO DE SINCRONIZAÇÃO ────────────────────────────────────────────────
+// Todo modelo sincronizável carrega:
+//   version     Int       — incrementa a cada escrita; base do Last-Write-Wins
+//   createdAt   DateTime
+//   updatedAt   DateTime
+//   deletedAt   DateTime? — exclusão é LÓGICA (tombstone). Apagar de verdade
+//                           impediria propagar a remoção para o outro nó.
+//   originNode  String    — qual nó escreveu; evita que a alteração volte
+//                           para quem a originou (eco infinito).
+//
+// Detalhes em `docs/offline-sync.md`.
+// ============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL_LOCAL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+  extensions        = [unaccent, pg_trgm, pgcrypto]
+}
+
+// ============================================================================
+// ENUMS
+// Espelhados em `packages/shared/src/enums/*` — ao alterar aqui, alterar lá.
+// ============================================================================
+
+enum RoleName {
+  USER
+  PROFESSOR
+  GYM_ADMIN
+  SUPER_ADMIN
+}
+
+enum BiologicalSex {
+  MALE
+  FEMALE
+  OTHER
+  UNDISCLOSED
+}
+
+enum FitnessGoal {
+  HYPERTROPHY
+  FAT_LOSS
+  STRENGTH
+  ENDURANCE
+  HEALTH
+  REHAB
+}
+
+enum ExperienceLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum ThemePreference {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum MeasurementUnit {
+  METRIC
+  IMPERIAL
+}
+
+enum GymStatus {
+  ACTIVE
+  BLOCKED
+  PENDING
+}
+
+enum MembershipRole {
+  MEMBER
+  PROFESSOR
+  ADMIN
+}
+
+enum MuscleRole {
+  PRIMARY
+  SECONDARY
+  STABILIZER
+}
+
+enum ExerciseMechanic {
+  COMPOUND
+  ISOLATION
+}
+
+enum ExerciseForce {
+  PUSH
+  PULL
+  STATIC
+}
+
+enum MediaType {
+  IMAGE
+  GIF
+  VIDEO
+  BANNER
+}
+
+enum WorkoutSplit {
+  ABC
+  ABCD
+  ABCDE
+  UPPER_LOWER
+  PUSH_PULL_LEGS
+  FULL_BODY
+  PERIODIZED
+  CUSTOM
+}
+
+enum SetTechnique {
+  NORMAL
+  SUPERSET
+  BISET
+  TRISET
+  GIANT_SET
+  DROPSET
+  REST_PAUSE
+  CLUSTER
+  PYRAMID
+  ISOMETRIC
+}
+
+enum MesocycleFocus {
+  ACCUMULATION
+  INTENSIFICATION
+  REALIZATION
+  DELOAD
+}
+
+enum WorkoutSessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum DrinkType {
+  WATER
+  TEA
+  COFFEE
+  SPORTS_DRINK
+  OTHER
+}
+
+enum MeasurementSite {
+  NECK
+  SHOULDER
+  CHEST
+  WAIST
+  ABDOMEN
+  HIP
+  LEFT_ARM
+  RIGHT_ARM
+  LEFT_FOREARM
+  RIGHT_FOREARM
+  LEFT_THIGH
+  RIGHT_THIGH
+  LEFT_CALF
+  RIGHT_CALF
+}
+
+enum PhotoPose {
+  FRONT
+  BACK
+  LEFT_SIDE
+  RIGHT_SIDE
+}
+
+enum AiProviderName {
+  CLAUDE
+  OPENAI
+  GEMINI
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AiTaskType {
+  WEEKLY_REPORT
+  WORKOUT_SUGGESTION
+  HYDRATION_ANALYSIS
+  PROGRESS_ANALYSIS
+  EXERCISE_DESCRIPTION
+}
+
+enum NotificationType {
+  HYDRATION_REMINDER
+  WORKOUT_REMINDER
+  WEEKLY_REPORT
+  ASSESSMENT_DUE
+  ANNOUNCEMENT
+  SYSTEM
+}
+
+enum DevicePlatform {
+  ANDROID
+  IOS
+  WEB
+}
+
+enum ChangeOperation {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum ChangeStatus {
+  PENDING
+  SYNCED
+  CONFLICT
+  FAILED
+}
+
+enum SyncTrigger {
+  SCHEDULED
+  RECONNECT
+  MANUAL
+  DEVICE
+}
+
+enum SyncDirection {
+  LOCAL_TO_CLOUD
+  CLOUD_TO_LOCAL
+  BIDIRECTIONAL
+}
+
+enum SyncRunStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum ConflictResolution {
+  LAST_WRITE_WINS
+  MERGE_UNION
+  LOCAL_WINS
+  CLOUD_WINS
+  MANUAL
+}
+
+enum DatabaseNode {
+  LOCAL
+  CLOUD
+}
+
+// ============================================================================
+// AUTENTICAÇÃO E RBAC
+// ============================================================================
+
+/// Papel do usuário na plataforma. Tabela (e não só enum) para permitir
+/// que o administrador geral ajuste permissões sem deploy.
+model Role {
+  id          String   @id @default(cuid())
+  name        RoleName @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+/// Permissão granular, no formato `recurso:ação` (ex.: "workout:create").
+model Permission {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+/// Usuário do Atlas — aluno, professor ou administrador.
+model User {
+  id     String @id @default(cuid())
+  email  String @unique
+  name   String
+  roleId String
+
+  /// Hash da senha. Nulo enquanto o login for exclusivamente por Google OAuth;
+  /// o campo já existe para o login por e-mail previsto no roadmap.
+  passwordHash String?
+
+  avatarUrl        String?
+  avatarPublicId   String? // public_id do Cloudinary, necessário para excluir
+  phone            String?
+  birthDate        DateTime?  @db.Date
+  sex              BiologicalSex   @default(UNDISCLOSED)
+  heightCm         Float?
+  weightKg         Float?
+  targetWeightKg   Float?
+  goal             FitnessGoal     @default(HEALTH)
+  experienceLevel  ExperienceLevel @default(BEGINNER)
+
+  /// Meta diária de água em mililitros.
+  dailyWaterGoalMl Int @default(2450)
+
+  locale String          @default("pt-BR")
+  theme  ThemePreference @default(SYSTEM)
+  units  MeasurementUnit @default(METRIC)
+
+  /// Preferências livres (notificações, flags de UI). JSON para não exigir
+  /// migração a cada nova opção de configuração da interface.
+  preferences Json @default("{}")
+
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+
+  // Sincronização
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  role               Role               @relation(fields: [roleId], references: [id])
+  oauthAccounts      OAuthAccount[]
+  refreshTokens      RefreshToken[]
+  memberships        GymMembership[]
+  workoutPlans       WorkoutPlan[]      @relation("PlanOwner")
+  createdPlans       WorkoutPlan[]      @relation("PlanAuthor")
+  workoutLogs        WorkoutLog[]
+  hydrationLogs      HydrationLog[]
+  hydrationReminders HydrationReminder[]
+  assessments        Assessment[]       @relation("AssessmentSubject")
+  performedAssessments Assessment[]     @relation("AssessmentAuthor")
+  weightLogs         WeightLog[]
+  dailyActivities    DailyActivity[]
+  weeklyReports      WeeklyReport[]
+  aiJobs             AiJob[]
+  notifications      Notification[]
+  devices            DeviceToken[]
+  syncCursors        SyncCursor[]
+  auditLogs          AuditLog[]
+
+  @@index([email])
+  @@index([roleId])
+  @@index([deletedAt])
+  @@index([updatedAt])
+  @@map("users")
+}
+
+/// Conta de provedor externo vinculada ao usuário (hoje: Google).
+model OAuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String // "google"
+  providerAccountId String
+  email             String?
+  accessToken       String?  @db.Text
+  refreshToken      String?  @db.Text
+  expiresAt         DateTime?
+  scope             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Uma conta do provedor não pode estar vinculada a dois usuários.
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+/// Refresh token emitido para um dispositivo.
+///
+/// Guardamos apenas o HASH: se o banco vazar, os tokens não são utilizáveis.
+/// `replacedById` encadeia as rotações — se um token já rotacionado for
+/// reapresentado, presume-se roubo e toda a família é revogada.
+model RefreshToken {
+  id           String    @id @default(cuid())
+  userId       String
+  tokenHash    String    @unique
+  jti          String    @unique
+  deviceId     String?
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  revokedReason String?
+  replacedById String?
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([deviceId])
+  @@map("refresh_tokens")
+}
+
+// ============================================================================
+// ACADEMIAS
+// ============================================================================
+
+model Gym {
+  id     String    @id @default(cuid())
+  name   String
+  slug   String    @unique
+  cnpj   String?   @unique
+  email  String?
+  phone  String?
+  logoUrl String?
+  logoPublicId String?
+
+  /// Endereço em JSON — não é consultado por campo, apenas exibido.
+  address Json?
+
+  status       GymStatus @default(ACTIVE)
+  blockedAt    DateTime?
+  blockedReason String?
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  memberships   GymMembership[]
+  exercises     Exercise[]
+  workoutPlans  WorkoutPlan[]
+  announcements Announcement[]
+
+  @@index([status])
+  @@index([slug])
+  @@map("gyms")
+}
+
+/// Vínculo entre usuário e academia. Um usuário pode pertencer a mais de
+/// uma academia (ex.: professor que atende em duas unidades).
+model GymMembership {
+  id     String         @id @default(cuid())
+  userId String
+  gymId  String
+  role   MembershipRole @default(MEMBER)
+
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  isActive  Boolean   @default(true)
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gym  Gym  @relation(fields: [gymId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, gymId])
+  @@index([gymId])
+  @@index([userId])
+  @@map("gym_memberships")
+}
+
+// ============================================================================
+// CATÁLOGO DE EXERCÍCIOS
+// ============================================================================
+
+/// Grupo muscular. O autorrelacionamento `parent` cria os subgrupos
+/// (ex.: "peitoral superior" dentro de "peito"), sem precisar de outra tabela.
+model MuscleGroup {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique
+  parentId String?
+  imageUrl String?
+  position Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parent    MuscleGroup?  @relation("MuscleGroupHierarchy", fields: [parentId], references: [id])
+  children  MuscleGroup[] @relation("MuscleGroupHierarchy")
+  muscles   Muscle[]
+  exercises Exercise[]    @relation("ExerciseMuscleGroup")
+  subExercises Exercise[] @relation("ExerciseMuscleSubGroup")
+
+  @@index([parentId])
+  @@map("muscle_groups")
+}
+
+/// Músculo individual, usado para detalhar quais músculos o exercício recruta.
+model Muscle {
+  id            String  @id @default(cuid())
+  name          String
+  slug          String  @unique
+  latinName     String?
+  muscleGroupId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  muscleGroup MuscleGroup      @relation(fields: [muscleGroupId], references: [id])
+  exercises   ExerciseMuscle[]
+
+  @@index([muscleGroupId])
+  @@map("muscles")
+}
+
+model Equipment {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique
+  imageUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  exercises ExerciseEquipment[]
+
+  @@map("equipment")
+}
+
+/// Exercício do catálogo.
+///
+/// `gymId` nulo = exercício global (visível para todos). Preenchido =
+/// exercício exclusivo daquela academia.
+model Exercise {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String? @db.Text
+  /// Passo a passo da execução.
+  execution   String  @db.Text
+
+  mechanic   ExerciseMechanic?
+  force      ExerciseForce?
+  difficulty ExperienceLevel   @default(BEGINNER)
+
+  muscleGroupId    String
+  muscleSubGroupId String?
+
+  /// Erros comuns e dicas exibidos na tela do exercício.
+  commonMistakes String[] @default([])
+  tips           String[] @default([])
+
+  // ── Classificações de estímulo (0 a 5) ───────────────────────────────
+  // Notas separadas em colunas (e não em JSON) porque são usadas para
+  // ordenar e filtrar o catálogo por objetivo — precisam ser indexáveis.
+  stimulusHypertrophy        Float @default(0)
+  stimulusStrength           Float @default(0)
+  stimulusEndurance          Float @default(0)
+  stimulusCaloricExpenditure Float @default(0)
+  stimulusMechanicalTension  Float @default(0)
+  stimulusStability          Float @default(0)
+
+  gymId    String?
+  isActive Boolean @default(true)
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  muscleGroup    MuscleGroup       @relation("ExerciseMuscleGroup", fields: [muscleGroupId], references: [id])
+  muscleSubGroup MuscleGroup?      @relation("ExerciseMuscleSubGroup", fields: [muscleSubGroupId], references: [id])
+  gym            Gym?              @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  muscles        ExerciseMuscle[]
+  equipment      ExerciseEquipment[]
+  media          ExerciseMedia[]
+  workoutItems   WorkoutExercise[]
+  setLogs        SetLog[]
+
+  @@index([muscleGroupId])
+  @@index([gymId])
+  @@index([isActive])
+  @@index([name])
+  @@map("exercises")
+}
+
+model ExerciseMuscle {
+  exerciseId String
+  muscleId   String
+  role       MuscleRole @default(PRIMARY)
+
+  exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  muscle   Muscle   @relation(fields: [muscleId], references: [id], onDelete: Cascade)
+
+  @@id([exerciseId, muscleId])
+  @@index([muscleId])
+  @@map("exercise_muscles")
+}
+
+model ExerciseEquipment {
+  exerciseId  String
+  equipmentId String
+
+  exercise  Exercise  @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@id([exerciseId, equipmentId])
+  @@index([equipmentId])
+  @@map("exercise_equipment")
+}
+
+/// Mídia do exercício hospedada no Cloudinary.
+/// `publicId` é obrigatório para conseguir remover o arquivo remoto depois.
+model ExerciseMedia {
+  id           String    @id @default(cuid())
+  exerciseId   String
+  type         MediaType
+  url          String
+  publicId     String?
+  thumbnailUrl String?
+  caption      String?
+  position     Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+
+  @@index([exerciseId])
+  @@map("exercise_media")
+}
+
+// ============================================================================
+// TREINOS
+//
+// Três níveis:
+//   WorkoutPlan → o programa (ABC, PPL, periodizado…)
+//   WorkoutDay  → o "treino A", "treino B"… com seus exercícios
+//   WorkoutLog  → uma execução real, com SetLog por série feita
+// ============================================================================
+
+model WorkoutPlan {
+  id          String       @id @default(cuid())
+  name        String
+  description String?      @db.Text
+  split       WorkoutSplit
+
+  /// Dono do plano. Nulo quando é um modelo da academia ainda não atribuído.
+  userId     String?
+  /// Quem criou (professor/admin). Nulo se o próprio aluno montou.
+  createdById String?
+  gymId      String?
+
+  startsAt DateTime?
+  endsAt   DateTime?
+
+  /// Modelo reutilizável, não atribuído a um aluno específico.
+  isTemplate Boolean @default(false)
+  isActive   Boolean @default(true)
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user       User?        @relation("PlanOwner", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy  User?        @relation("PlanAuthor", fields: [createdById], references: [id])
+  gym        Gym?         @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  days       WorkoutDay[]
+  mesocycles Mesocycle[]
+  logs       WorkoutLog[]
+
+  @@index([userId])
+  @@index([gymId])
+  @@index([isActive])
+  @@map("workout_plans")
+}
+
+/// Bloco de periodização (para `split = PERIODIZED`).
+model Mesocycle {
+  id            String          @id @default(cuid())
+  workoutPlanId String
+  name          String
+  position      Int
+  weeks         Int
+  focus         MesocycleFocus?
+  notes         String?         @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workoutPlan WorkoutPlan  @relation(fields: [workoutPlanId], references: [id], onDelete: Cascade)
+  microcycles Microcycle[]
+
+  @@index([workoutPlanId])
+  @@map("mesocycles")
+}
+
+/// Semana dentro de um mesociclo, com os ajustes de volume/intensidade.
+model Microcycle {
+  id          String @id @default(cuid())
+  mesocycleId String
+  weekNumber  Int
+
+  /// Multiplicadores aplicados sobre a prescrição base do dia de treino.
+  volumeMultiplier    Float @default(1)
+  intensityMultiplier Float @default(1)
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  mesocycle Mesocycle @relation(fields: [mesocycleId], references: [id], onDelete: Cascade)
+
+  @@unique([mesocycleId, weekNumber])
+  @@map("microcycles")
+}
+
+/// Um dia do programa: "treino A", "Push", "Upper"…
+model WorkoutDay {
+  id            String @id @default(cuid())
+  workoutPlanId String
+  label         String
+  name          String?
+  position      Int
+
+  /// Dias da semana sugeridos (0 = domingo … 6 = sábado).
+  weekdays Int[]   @default([])
+  notes    String? @db.Text
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  workoutPlan WorkoutPlan       @relation(fields: [workoutPlanId], references: [id], onDelete: Cascade)
+  exercises   WorkoutExercise[]
+  logs        WorkoutLog[]
+
+  @@index([workoutPlanId])
+  @@map("workout_days")
+}
+
+/// Prescrição de um exercício dentro de um dia de treino.
+model WorkoutExercise {
+  id           String @id @default(cuid())
+  workoutDayId String
+  exerciseId   String
+  position     Int
+
+  sets Int
+  /// Faixa de repetições no formato "10" ou "8-12".
+  reps String
+
+  technique SetTechnique @default(NORMAL)
+  /// Agrupa exercícios que compartilham a técnica: dois itens com o mesmo
+  /// `groupKey` e technique=SUPERSET formam uma supersérie.
+  groupKey  String?
+
+  targetWeightKg Float?
+  targetRpe      Float?
+  targetRir      Int?
+  /// Tempo de execução em 4 dígitos (ex.: "3010").
+  tempo          String?
+  restSeconds    Int     @default(60)
+  notes          String? @db.Text
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  workoutDay WorkoutDay @relation(fields: [workoutDayId], references: [id], onDelete: Cascade)
+  exercise   Exercise   @relation(fields: [exerciseId], references: [id])
+
+  @@index([workoutDayId])
+  @@index([exerciseId])
+  @@map("workout_exercises")
+}
+
+/// Uma sessão de treino executada pelo aluno.
+model WorkoutLog {
+  id            String  @id @default(cuid())
+  userId        String
+  workoutPlanId String?
+  workoutDayId  String?
+
+  startedAt  DateTime
+  finishedAt DateTime?
+  status     WorkoutSessionStatus @default(IN_PROGRESS)
+
+  /// Volume total da sessão (Σ séries × reps × carga), calculado ao finalizar.
+  totalVolumeLoad Float?
+  durationSeconds Int?
+  /// Avaliação da sessão pelo aluno (1 a 5).
+  rating          Int?
+  notes           String? @db.Text
+
+  /// ID gerado no dispositivo. Garante idempotência quando a sessão foi
+  /// registrada offline e sobe mais de uma vez na sincronização.
+  clientGeneratedId String?
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workoutPlan WorkoutPlan? @relation(fields: [workoutPlanId], references: [id])
+  workoutDay  WorkoutDay?  @relation(fields: [workoutDayId], references: [id])
+  sets        SetLog[]
+
+  @@unique([userId, clientGeneratedId])
+  @@index([userId, startedAt])
+  @@index([status])
+  @@index([updatedAt])
+  @@map("workout_logs")
+}
+
+/// Uma série efetivamente executada.
+model SetLog {
+  id           String @id @default(cuid())
+  workoutLogId String
+  exerciseId   String
+  setNumber    Int
+
+  reps     Int
+  weightKg Float
+
+  technique       SetTechnique @default(NORMAL)
+  rpe             Float?
+  rir             Int?
+  durationSeconds Int?
+  restSeconds     Int?
+  /// Séries de aquecimento não entram no cálculo de volume.
+  isWarmup        Boolean      @default(false)
+
+  completedAt DateTime
+  notes       String?
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  workoutLog WorkoutLog @relation(fields: [workoutLogId], references: [id], onDelete: Cascade)
+  exercise   Exercise   @relation(fields: [exerciseId], references: [id])
+
+  @@index([workoutLogId])
+  @@index([exerciseId])
+  @@map("set_logs")
+}
+
+// ============================================================================
+// HIDRATAÇÃO
+// ============================================================================
+
+/// Registro de consumo de líquido.
+///
+/// Coleção append-only: na sincronização usa MERGE_UNION (mantém os dois
+/// lados) em vez de Last-Write-Wins — dois registros feitos offline em
+/// aparelhos diferentes são ambos verdadeiros.
+model HydrationLog {
+  id        String    @id @default(cuid())
+  userId    String
+  amountMl  Int
+  drinkType DrinkType @default(WATER)
+
+  consumedAt DateTime
+  /// Dia (YYYY-MM-DD) no fuso do produto. Desnormalizado de propósito:
+  /// agregar por dia sem recalcular fuso a cada consulta.
+  dayKey     String   @db.VarChar(10)
+
+  note String?
+
+  clientGeneratedId String?
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientGeneratedId])
+  @@index([userId, dayKey])
+  @@index([consumedAt])
+  @@index([updatedAt])
+  @@map("hydration_logs")
+}
+
+/// Configuração de lembretes de hidratação do usuário.
+model HydrationReminder {
+  id      String  @id @default(cuid())
+  userId  String
+  enabled Boolean @default(true)
+
+  /// Janela de lembretes, formato HH:mm.
+  startTime String @default("08:00") @db.VarChar(5)
+  endTime   String @default("22:00") @db.VarChar(5)
+
+  /// Intervalo entre lembretes; alternativa a `times`.
+  intervalMinutes Int?
+  /// Horários fixos (HH:mm), quando não se usa intervalo.
+  times           String[] @default([])
+
+  weekdays Int[] @default([0, 1, 2, 3, 4, 5, 6])
+  /// Não lembra se a meta do dia já foi atingida.
+  skipWhenGoalReached Boolean @default(true)
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("hydration_reminders")
+}
+
+// ============================================================================
+// AVALIAÇÕES FÍSICAS
+// ============================================================================
+
+model Assessment {
+  id     String @id @default(cuid())
+  userId String
+  /// Profissional responsável, quando feita na academia.
+  assessedById String?
+
+  assessedAt DateTime
+
+  weightKg Float
+  heightCm Float
+  /// IMC e composição são gravados (não só calculados na leitura) para
+  /// preservar o valor histórico mesmo se a fórmula mudar.
+  bmi              Float
+  bodyFatPercent   Float?
+  leanMassKg       Float?
+  muscleMassKg     Float?
+  restingHeartRate Int?
+
+  notes String? @db.Text
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user         User               @relation("AssessmentSubject", fields: [userId], references: [id], onDelete: Cascade)
+  assessedBy   User?              @relation("AssessmentAuthor", fields: [assessedById], references: [id])
+  measurements BodyMeasurement[]
+  photos       AssessmentPhoto[]
+
+  @@index([userId, assessedAt])
+  @@index([updatedAt])
+  @@map("assessments")
+}
+
+model BodyMeasurement {
+  id           String          @id @default(cuid())
+  assessmentId String
+  site         MeasurementSite
+  valueCm      Float
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, site])
+  @@map("body_measurements")
+}
+
+model AssessmentPhoto {
+  id           String    @id @default(cuid())
+  assessmentId String
+  pose         PhotoPose
+  url          String
+  publicId     String?
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId])
+  @@map("assessment_photos")
+}
+
+// ============================================================================
+// PROGRESSO E TELA INICIAL
+// ============================================================================
+
+/// Ponto na linha do tempo de peso. Separado de `Assessment` porque o aluno
+/// se pesa com muito mais frequência do que faz avaliação completa.
+model WeightLog {
+  id         String   @id @default(cuid())
+  userId     String
+  weightKg   Float
+  measuredAt DateTime
+  dayKey     String   @db.VarChar(10)
+  note       String?
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dayKey])
+  @@index([userId, measuredAt])
+  @@map("weight_logs")
+}
+
+/// Resumo diário pré-calculado que alimenta a Home.
+///
+/// Materializar aqui evita varrer treinos e hidratação a cada abertura do
+/// app — a tela inicial é a rota mais acessada do produto.
+model DailyActivity {
+  id     String @id @default(cuid())
+  userId String
+  dayKey String @db.VarChar(10)
+
+  hydrationTotalMl Int     @default(0)
+  hydrationGoalMl  Int
+  hydrationGoalMet Boolean @default(false)
+
+  workoutCompleted Boolean @default(false)
+  workoutCount     Int     @default(0)
+  volumeLoad       Float   @default(0)
+  activeMinutes    Int     @default(0)
+
+  /// Sequência de dias consecutivos com treino, até este dia.
+  streak Int @default(0)
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dayKey])
+  @@index([userId, dayKey])
+  @@map("daily_activities")
+}
+
+/// Dica exibida na Home.
+model Tip {
+  id       String  @id @default(cuid())
+  title    String
+  content  String  @db.Text
+  category String?
+  imageUrl String?
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@map("tips")
+}
+
+/// Aviso da academia ou da plataforma.
+model Announcement {
+  id      String  @id @default(cuid())
+  gymId   String?
+  title   String
+  content String  @db.Text
+  imageUrl String?
+
+  startsAt DateTime  @default(now())
+  endsAt   DateTime?
+  isActive Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  gym Gym? @relation(fields: [gymId], references: [id], onDelete: Cascade)
+
+  @@index([gymId])
+  @@index([isActive])
+  @@map("announcements")
+}
+
+// ============================================================================
+// INTELIGÊNCIA ARTIFICIAL
+// ============================================================================
+
+/// Relatório semanal gerado pela IA via workflow do N8N.
+model WeeklyReport {
+  id     String @id @default(cuid())
+  userId String
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  status JobStatus @default(PENDING)
+
+  summary   String?  @db.Text
+  positives String[] @default([])
+  negatives String[] @default([])
+
+  workoutSuggestion  String? @db.Text
+  hydrationAnalysis  Json?
+  evolution          Json?
+  frequency          Json?
+  /// Séries prontas para o gráfico da UI e do PDF.
+  chartData          Json?
+
+  pdfUrl      String?
+  pdfPublicId String?
+
+  provider   AiProviderName?
+  tokensUsed Int?
+  errorMessage String?      @db.Text
+  generatedAt  DateTime?
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, periodStart])
+  @@index([userId, periodEnd])
+  @@index([status])
+  @@map("weekly_reports")
+}
+
+/// Execução individual de uma tarefa de IA — trilha de custo e auditoria.
+model AiJob {
+  id     String     @id @default(cuid())
+  userId String?
+  task   AiTaskType
+  status JobStatus  @default(PENDING)
+
+  provider AiProviderName
+  model    String
+
+  /// Prompt e resposta guardados para depuração e auditoria de conteúdo.
+  prompt   String? @db.Text
+  response String? @db.Text
+
+  inputTokens  Int?
+  outputTokens Int?
+  costUsd      Float?
+  latencyMs    Int?
+
+  errorMessage String?   @db.Text
+  attempts     Int       @default(0)
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([task])
+  @@map("ai_jobs")
+}
+
+// ============================================================================
+// NOTIFICAÇÕES
+// ============================================================================
+
+model Notification {
+  id     String           @id @default(cuid())
+  userId String
+  type   NotificationType
+  title  String
+  body   String           @db.Text
+  /// Payload de navegação (ex.: { screen: "workout", id: "..." }).
+  data   Json?
+
+  readAt      DateTime?
+  sentAt      DateTime?
+  scheduledFor DateTime?
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([scheduledFor])
+  @@map("notifications")
+}
+
+/// Dispositivo registrado para push (Expo) e para sincronização.
+model DeviceToken {
+  id       String         @id @default(cuid())
+  userId   String
+  deviceId String
+  platform DevicePlatform
+  /// Token do Expo Push. Nulo se o usuário negou a permissão.
+  pushToken String?
+  appVersion String?
+  isActive  Boolean       @default(true)
+  lastSeenAt DateTime     @default(now())
+
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  originNode String    @default("local-dev-01")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([pushToken])
+  @@map("device_tokens")
+}
+
+// ============================================================================
+// SINCRONIZAÇÃO E AUDITORIA
+// ============================================================================
+
+/// Outbox: toda escrita registra aqui o que mudou.
+///
+/// É a fonte da verdade da sincronização — o worker lê as entradas PENDING
+/// e as aplica no outro banco. Sem esse log seria preciso varrer todas as
+/// tabelas por `updatedAt`, o que não detecta exclusões nem ordena as
+/// operações corretamente.
+model ChangeLog {
+  id       String @id @default(cuid())
+  entity   String
+  entityId String
+
+  operation ChangeOperation
+  status    ChangeStatus    @default(PENDING)
+
+  /// Estado do registro após a operação. Em DELETE, apenas as chaves.
+  payload Json
+  version Int
+
+  originNode String
+  /// Para onde esta alteração precisa ser propagada.
+  targetNode DatabaseNode
+
+  occurredAt DateTime  @default(now())
+  syncedAt   DateTime?
+  attempts   Int       @default(0)
+  lastError  String?   @db.Text
+
+  syncRunId String?
+
+  createdAt DateTime @default(now())
+
+  syncRun SyncRun? @relation(fields: [syncRunId], references: [id])
+
+  @@index([status, occurredAt])
+  @@index([entity, entityId])
+  @@index([syncRunId])
+  @@map("change_logs")
+}
+
+/// Uma execução de sincronização (agendada às 03:00/18:00, manual ou por reconexão).
+model SyncRun {
+  id        String        @id @default(cuid())
+  trigger   SyncTrigger
+  direction SyncDirection
+  status    SyncRunStatus @default(RUNNING)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  pushedCount    Int @default(0)
+  pulledCount    Int @default(0)
+  conflictCount  Int @default(0)
+  failedCount    Int @default(0)
+
+  /// Dispositivo que originou, quando `trigger = DEVICE`.
+  deviceId     String?
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  changes   ChangeLog[]
+  conflicts SyncConflict[]
+
+  @@index([status, startedAt])
+  @@index([trigger])
+  @@map("sync_runs")
+}
+
+/// Divergência encontrada durante a reconciliação.
+///
+/// Guarda os dois lados para que um administrador possa decidir quando a
+/// resolução automática não é segura.
+model SyncConflict {
+  id       String @id @default(cuid())
+  syncRunId String?
+
+  entity   String
+  entityId String
+
+  localVersion  Int
+  cloudVersion  Int
+  localPayload  Json
+  cloudPayload  Json
+
+  resolution ConflictResolution
+  /// Falso enquanto aguarda decisão humana.
+  resolved   Boolean            @default(false)
+  resolvedAt DateTime?
+  resolvedById String?
+  mergedPayload Json?
+  note       String?            @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  syncRun SyncRun? @relation(fields: [syncRunId], references: [id])
+
+  @@index([resolved])
+  @@index([entity, entityId])
+  @@map("sync_conflicts")
+}
+
+/// Marca d'água por dispositivo: até onde ele já sincronizou.
+model SyncCursor {
+  id       String @id @default(cuid())
+  userId   String
+  deviceId String
+
+  lastPulledAt DateTime?
+  lastPushedAt DateTime?
+  /// Entidades que este dispositivo sincroniza. Vazio = todas.
+  entities     String[]  @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([deviceId])
+  @@map("sync_cursors")
+}
+
+/// Trilha de auditoria de ações sensíveis (exigência da especificação).
+model AuditLog {
+  id     String  @id @default(cuid())
+  userId String?
+
+  action   String
+  entity   String?
+  entityId String?
+
+  /// Estado antes e depois, para ações que alteram dados.
+  before Json?
+  after  Json?
+
+  ipAddress String?
+  userAgent String?
+  requestId String?
+
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// SISTEMA
+// ============================================================================
+
+/// Configuração global editável sem deploy (singleton por chave).
+model AppConfig {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("app_config")
+}
+
+model FeatureFlag {
+  id          String  @id @default(cuid())
+  key         String  @unique
+  enabled     Boolean @default(false)
+  description String?
+  /// Percentual de rollout (0 a 100) para liberação gradual.
+  rolloutPercentage Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("feature_flags")
+}
+
+/// Registro dos workflows do N8N — permite ao administrador geral
+/// acompanhá-los sem entrar no painel do N8N.
+model WorkflowRegistry {
+  id          String  @id @default(cuid())
+  n8nWorkflowId String @unique
+  name        String
+  description String?
+  webhookPath String?
+  isActive    Boolean @default(true)
+
+  lastRunAt     DateTime?
+  lastRunStatus String?
+  runCount      Int       @default(0)
+  failureCount  Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("workflow_registry")
+}

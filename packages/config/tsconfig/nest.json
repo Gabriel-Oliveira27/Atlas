@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Atlas NestJS",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    // O Nest resolve dependências por metadados de decorator em runtime.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "isolatedModules": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    // O Nest usa `class-validator`/`class-transformer`, que dependem de
+    // inicialização de propriedade em tempo de execução.
+    "strictPropertyInitialization": false
+  },
+  "include": ["src/**/*"]
+}

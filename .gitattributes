@@ -1,0 +1,32 @@
+# Normaliza as quebras de linha.
+#
+# O projeto é desenvolvido no Windows mas roda em Linux (Docker, CI).
+# Sem isto, o git converteria para CRLF no checkout e os arquivos
+# chegariam ao container com \r — o que quebra shebangs de script shell
+# (`#!/bin/bash\r` vira "arquivo não encontrado") e polui todo diff.
+* text=auto eol=lf
+
+# Scripts que rodam DENTRO de containers Linux: LF obrigatório.
+*.sh text eol=lf
+infra/docker/init-db/* text eol=lf
+
+# Arquivos que o Windows exige em CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binários — não tocar.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.mwb binary
+*.apk binary
+*.aab binary
+*.keystore binary
+*.jks binary
+
+# Lockfile: gerado, não revisar em diff.
+pnpm-lock.yaml linguist-generated=true -diff

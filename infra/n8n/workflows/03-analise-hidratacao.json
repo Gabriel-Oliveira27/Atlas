@@ -1,0 +1,98 @@
+{
+  "name": "Atlas — Análise de Hidratação",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 20 * * *" }]
+        }
+      },
+      "id": "trigger-diario",
+      "name": "Todo dia às 20:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-440, 300],
+      "notes": "20:00 ainda dá tempo de o usuário reagir e bater a meta antes de dormir."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ATLAS_API_URL }}/admin/hydration/below-goal",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": { "timeout": 30000 }
+      },
+      "id": "buscar-abaixo",
+      "name": "Usuários abaixo da meta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-220, 300],
+      "notes": "TODO(roadmap Beta): implementar esta rota administrativa na API."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Personaliza a mensagem pelo tamanho do déficit. Um lembrete\n// genérico é ignorado; um número concreto tende a gerar ação.\nconst u = $json;\nconst faltamMl = Math.max(0, (u.goalMl ?? 0) - (u.totalMl ?? 0));\nconst copos = Math.ceil(faltamMl / 250);\n\nlet titulo;\nlet corpo;\n\nif (faltamMl <= 0) {\n  return { json: { pular: true } };\n} else if (copos <= 2) {\n  titulo = 'Quase lá!';\n  corpo = `Faltam só ${copos} copo(s) para bater sua meta de hoje.`;\n} else {\n  titulo = 'Hora de se hidratar';\n  corpo = `Você bebeu ${u.totalMl} ml de ${u.goalMl} ml. Faltam ${faltamMl} ml.`;\n}\n\nreturn { json: { userId: u.userId, titulo, corpo, faltamMl } };"
+      },
+      "id": "montar-mensagem",
+      "name": "Montar mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.pular }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notTrue", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filtrar",
+      "name": "Ainda falta água?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATLAS_API_URL }}/notifications/send",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ userId: $json.userId, type: 'HYDRATION_REMINDER', title: $json.titulo, body: $json.corpo }) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": { "timeout": 20000 }
+      },
+      "id": "enviar",
+      "name": "Enviar notificação",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 240],
+      "notes": "TODO(roadmap Beta): rota de envio de push via Expo."
+    }
+  ],
+  "connections": {
+    "Todo dia às 20:00": {
+      "main": [[{ "node": "Usuários abaixo da meta", "type": "main", "index": 0 }]]
+    },
+    "Usuários abaixo da meta": {
+      "main": [[{ "node": "Montar mensagem", "type": "main", "index": 0 }]]
+    },
+    "Montar mensagem": {
+      "main": [[{ "node": "Ainda falta água?", "type": "main", "index": 0 }]]
+    },
+    "Ainda falta água?": {
+      "main": [[{ "node": "Enviar notificação", "type": "main", "index": 0 }], []]
+    }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "America/Sao_Paulo" },
+  "tags": [{ "name": "atlas" }, { "name": "hidratacao" }]
+}

@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Segredos falsos: o CI não acessa serviços reais, mas o schema de
+  # ambiente (Zod) exige valores válidos para os builds passarem.
+  DATABASE_URL_LOCAL: postgresql://atlas:atlas@localhost:5432/atlas?schema=public
+  JWT_ACCESS_SECRET: ci-access-secret-not-used-in-production
+  JWT_REFRESH_SECRET: ci-refresh-secret-not-used-in-production
+  REDIS_URL: redis://localhost:6379
+
+jobs:
+  quality:
+    name: Lint, tipos e testes
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: atlas
+          POSTGRES_PASSWORD: atlas
+          POSTGRES_DB: atlas
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      # O client do Prisma é gerado, não versionado — sem isto o
+      # typecheck falha por não encontrar os tipos dos modelos.
+      - name: Gerar Prisma Client
+        run: pnpm db:generate
+
+      - name: Formatação
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Verificação de tipos
+        run: pnpm typecheck
+
+      - name: Testes
+        run: pnpm test
+
+      - name: Migrations aplicam sem erro
+        run: pnpm --filter @atlas/database migrate:deploy
+
+      - name: Build
+        run: pnpm build
+
+  docker:
+    name: Docker Compose é válido
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar composição
+        run: |
+          cp infra/docker/.env.example infra/docker/.env
+          docker compose -f infra/docker/docker-compose.yml \
+            --env-file infra/docker/.env config --quiet

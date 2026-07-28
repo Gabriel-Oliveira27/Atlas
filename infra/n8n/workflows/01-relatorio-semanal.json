@@ -1,0 +1,127 @@
+{
+  "name": "Atlas — Relatório Semanal",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "trigger-semanal",
+      "name": "Toda segunda às 06:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-460, 300],
+      "notes": "Segunda de manhã: a semana anterior está fechada e o aluno recebe o relatório antes de treinar."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.ATLAS_API_URL }}/admin/users/active",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": { "timeout": 30000 }
+      },
+      "id": "listar-usuarios",
+      "name": "Listar usuários ativos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, 300],
+      "notes": "Retorna os usuários que devem receber o relatório (weeklyReportEnabled = true)."
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "lotes",
+      "name": "Processar em lotes de 5",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [-20, 300],
+      "notes": "Lotes pequenos evitam estourar o rate limit do provedor de IA."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATLAS_API_URL }}/ai/reports/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ userId: $json.id }) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": { "timeout": 120000 }
+      },
+      "id": "gerar-relatorio",
+      "name": "Gerar relatório (IA)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [200, 300],
+      "notes": "A API chama o provedor configurado (Claude por padrão) e persiste em WeeklyReport.",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Monta o HTML do PDF a partir do relatório devolvido pela API.\n// Manter a montagem aqui (e não na API) permite ajustar o layout do\n// PDF sem redeploy do back-end.\nconst r = $json.data ?? $json;\n\nconst lista = (itens) =>\n  (itens ?? []).map((i) => `<li>${i}</li>`).join('') || '<li>—</li>';\n\nconst html = `<!doctype html>\n<html lang=\"pt-BR\"><head><meta charset=\"utf-8\">\n<style>\n  body { font-family: system-ui, sans-serif; color:#1a1a1a; padding:40px; }\n  h1 { font-size:24px; margin-bottom:4px; }\n  .periodo { color:#666; font-size:13px; margin-bottom:24px; }\n  h2 { font-size:16px; margin-top:24px; }\n  .metricas { display:flex; gap:24px; margin:16px 0; }\n  .metrica { background:#f5f5f5; padding:12px 16px; border-radius:8px; }\n  .valor { font-size:22px; font-weight:600; }\n  .rotulo { font-size:11px; color:#666; text-transform:uppercase; }\n</style></head><body>\n  <h1>Relatório semanal — Atlas</h1>\n  <div class=\"periodo\">${r.periodStart ?? ''} a ${r.periodEnd ?? ''}</div>\n  <p>${r.summary ?? ''}</p>\n  <div class=\"metricas\">\n    <div class=\"metrica\"><div class=\"valor\">${r.evolution?.workoutsCompleted ?? 0}</div><div class=\"rotulo\">Treinos</div></div>\n    <div class=\"metrica\"><div class=\"valor\">${Math.round(r.evolution?.adherencePercent ?? 0)}%</div><div class=\"rotulo\">Aderência</div></div>\n    <div class=\"metrica\"><div class=\"valor\">${r.hydration?.daysGoalReached ?? r.hydrationAnalysis?.daysGoalReached ?? 0}/7</div><div class=\"rotulo\">Meta de água</div></div>\n    <div class=\"metrica\"><div class=\"valor\">${r.frequency?.streak ?? 0}</div><div class=\"rotulo\">Sequência</div></div>\n  </div>\n  <h2>Pontos positivos</h2><ul>${lista(r.positives)}</ul>\n  <h2>Pontos de atenção</h2><ul>${lista(r.negatives)}</ul>\n  <h2>Hidratação</h2><p>${r.hydrationAnalysis?.comment ?? '—'}</p>\n  <h2>Sugestão para a próxima semana</h2><p>${r.workoutSuggestion ?? '—'}</p>\n</body></html>`;\n\nreturn { json: { ...r, html } };"
+      },
+      "id": "montar-html",
+      "name": "Montar HTML do PDF",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATLAS_API_URL }}/ai/webhooks/weekly-report",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-atlas-signature",
+              "value": "={{ $env.ATLAS_WEBHOOK_SIGNATURE }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ reportId: $json.id, status: 'COMPLETED', pdfUrl: $json.pdfUrl ?? null }) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "confirmar",
+      "name": "Confirmar para a API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300],
+      "notes": "A assinatura HMAC é obrigatória — sem ela a API rejeita com 401."
+    }
+  ],
+  "connections": {
+    "Toda segunda às 06:00": {
+      "main": [[{ "node": "Listar usuários ativos", "type": "main", "index": 0 }]]
+    },
+    "Listar usuários ativos": {
+      "main": [[{ "node": "Processar em lotes de 5", "type": "main", "index": 0 }]]
+    },
+    "Processar em lotes de 5": {
+      "main": [[], [{ "node": "Gerar relatório (IA)", "type": "main", "index": 0 }]]
+    },
+    "Gerar relatório (IA)": {
+      "main": [[{ "node": "Montar HTML do PDF", "type": "main", "index": 0 }]]
+    },
+    "Montar HTML do PDF": {
+      "main": [[{ "node": "Confirmar para a API", "type": "main", "index": 0 }]]
+    },
+    "Confirmar para a API": {
+      "main": [[{ "node": "Processar em lotes de 5", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "America/Sao_Paulo" },
+  "tags": [{ "name": "atlas" }, { "name": "ia" }]
+}

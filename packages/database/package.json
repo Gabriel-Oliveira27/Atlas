@@ -1,0 +1,44 @@
+{
+  "name": "@atlas/database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Camada de dados do Atlas — schema Prisma, cliente duplo (local/Neon), repositórios base e seeds",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "dotenv -e ../../.env -- prisma generate --schema prisma/schema.prisma",
+    "migrate:local": "dotenv -e ../../.env -- prisma migrate dev --schema prisma/schema.prisma",
+    "migrate:deploy": "dotenv -e ../../.env -- prisma migrate deploy --schema prisma/schema.prisma",
+    "migrate:cloud": "node ./scripts/migrate-cloud.mjs",
+    "push": "dotenv -e ../../.env -- prisma db push --schema prisma/schema.prisma",
+    "seed": "dotenv -e ../../.env -- tsx prisma/seed.ts",
+    "studio": "dotenv -e ../../.env -- prisma studio --schema prisma/schema.prisma",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo generated",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@atlas/shared": "workspace:*",
+    "@prisma/client": "^5.22.0"
+  },
+  "devDependencies": {
+    "@atlas/config": "workspace:*",
+    "@faker-js/faker": "^9.2.0",
+    "dotenv-cli": "^7.4.4",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  }
+}

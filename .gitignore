@@ -1,0 +1,50 @@
+# Aplicativo Android — repositório PRÓPRIO em apk/atlas-app.
+# Fica dentro desta pasta só por conveniência (o script sync:contracts
+# do app lê os contratos daqui), mas os históricos são independentes.
+/apk
+
+# Dependências
+node_modules/
+.pnpm-store/
+
+# Build
+dist/
+build/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Ambiente — NUNCA commitar credenciais
+.env
+.env.local
+.env.*.local
+infra/docker/.env
+!.env.example
+!infra/docker/.env.example
+
+# Prisma
+packages/database/generated/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+logs/
+
+# Testes
+coverage/
+playwright-report/
+test-results/
+
+# Editores / SO
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Uploads e dados locais
+uploads/
+tmp/
