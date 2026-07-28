@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@atlas/config':
+        specifier: workspace:*
+        version: link:packages/config
       '@commitlint/cli':
         specifier: ^19.5.0
         version: 19.8.1(@types/node@22.20.1)(typescript@5.9.3)

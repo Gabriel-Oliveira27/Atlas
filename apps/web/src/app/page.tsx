@@ -9,10 +9,20 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
 import { api } from '@/lib/api';
+import { dayKeyToDate, formatTime } from '@/lib/format';
 import { AppShell } from '@/components/app-shell';
 import { ProgressRing } from '@/components/progress-ring';
 import { QueryState } from '@/components/query-state';
+import {
+  IconChevronRight,
+  IconDroplet,
+  IconDumbbell,
+  IconFlame,
+  IconPlay,
+  IconScale,
+} from '@/components/icons';
 
 interface HomeData {
   user: { name: string; avatarUrl: string | null; goal: string };
@@ -54,6 +64,15 @@ const GOAL_LABEL: Record<string, string> = {
 
 const WEEKDAYS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 
+/** Saudação pelo horário — detalhe pequeno, mas a tela parece viva. */
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) return 'Boa madrugada,';
+  if (hour < 12) return 'Bom dia,';
+  if (hour < 18) return 'Boa tarde,';
+  return 'Boa noite,';
+}
+
 export default function HomePage() {
   const query = useQuery({
     queryKey: ['home'],
@@ -66,25 +85,59 @@ export default function HomePage() {
         <QueryState query={query}>
           {(data) => (
             <>
-              {data.degraded && (
-                <div className="mb-5 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-                  Operando com o banco em nuvem (Neon). Suas alterações serão reconciliadas quando o
-                  banco local voltar.
+              {data.announcements.length > 0 && (
+                <div className="mb-5 space-y-2">
+                  {data.announcements.map((announcement) => (
+                    <div
+                      key={announcement.id}
+                      className="rounded-lg border border-accent/25 bg-accent/10 p-3"
+                    >
+                      <p className="text-sm font-medium text-accent">{announcement.title}</p>
+                      <p className="mt-0.5 text-sm leading-relaxed text-ink-muted">
+                        {announcement.content}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               )}
 
               <header className="mb-7">
-                <p className="text-sm text-ink-muted">Olá,</p>
+                <p className="text-sm text-ink-muted">{greeting()}</p>
                 <h1 className="text-2xl font-semibold tracking-tight">{data.user.name}</h1>
                 <p className="mt-1 text-xs text-ink-faint">
                   Objetivo: {GOAL_LABEL[data.user.goal] ?? data.user.goal}
                 </p>
               </header>
 
+              {/* Sessão aberta tem prioridade sobre tudo na tela. */}
+              {data.workout.inProgress && (
+                <Link
+                  href="/treino/sessao"
+                  className="mb-4 flex items-center justify-between gap-4 rounded-card border border-accent/40 bg-gradient-to-r from-accent/15 to-transparent p-4 transition hover:border-accent"
+                >
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wider text-accent">
+                      Treino em andamento
+                    </p>
+                    <p className="mt-0.5 text-sm text-ink-muted">
+                      Iniciado às{' '}
+                      {data.workout.session ? formatTime(data.workout.session.startedAt) : '—'} —
+                      toque para retomar
+                    </p>
+                  </div>
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-base">
+                    <IconPlay size={18} />
+                  </span>
+                </Link>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 {/* Hidratação */}
                 <section className="card">
-                  <h2 className="card-title">Hidratação de hoje</h2>
+                  <h2 className="card-title flex items-center gap-1.5">
+                    <IconDroplet size={13} />
+                    Hidratação de hoje
+                  </h2>
                   <div className="mt-4 flex items-center gap-5">
                     <ProgressRing percentage={data.hydration.percentage} />
                     <div>
@@ -104,29 +157,28 @@ export default function HomePage() {
                       </p>
                     </div>
                   </div>
-                  <a
+                  <Link
                     href="/hidratacao"
-                    className="mt-4 inline-block text-xs text-accent underline-offset-2 hover:underline"
+                    className="mt-4 inline-flex items-center gap-1 text-xs text-accent underline-offset-2 hover:underline"
                   >
-                    Registrar consumo →
-                  </a>
+                    Registrar consumo
+                    <IconChevronRight size={13} />
+                  </Link>
                 </section>
 
                 {/* Treino */}
                 <section className="card">
-                  <h2 className="card-title">Treino</h2>
+                  <h2 className="card-title flex items-center gap-1.5">
+                    <IconDumbbell size={13} />
+                    Treino
+                  </h2>
                   <div className="mt-4">
                     {data.workout.inProgress ? (
                       <>
                         <p className="stat text-accent">Em andamento</p>
                         <p className="mt-1 text-xs text-ink-muted">
                           Iniciado às{' '}
-                          {data.workout.session
-                            ? new Date(data.workout.session.startedAt).toLocaleTimeString('pt-BR', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })
-                            : '—'}
+                          {data.workout.session ? formatTime(data.workout.session.startedAt) : '—'}
                         </p>
                       </>
                     ) : data.workout.completedToday ? (
@@ -143,11 +195,21 @@ export default function HomePage() {
                       </>
                     )}
                   </div>
+                  <Link
+                    href="/treino"
+                    className="mt-4 inline-flex items-center gap-1 text-xs text-accent underline-offset-2 hover:underline"
+                  >
+                    {data.workout.inProgress ? 'Retomar treino' : 'Ir para o treino'}
+                    <IconChevronRight size={13} />
+                  </Link>
                 </section>
 
                 {/* Sequência */}
                 <section className="card">
-                  <h2 className="card-title">Sequência</h2>
+                  <h2 className="card-title flex items-center gap-1.5">
+                    <IconFlame size={13} />
+                    Sequência
+                  </h2>
                   <p className="stat mt-4">
                     {data.streak}
                     <span className="ml-1 text-base font-normal text-ink-faint">
@@ -159,7 +221,10 @@ export default function HomePage() {
 
                 {/* Peso */}
                 <section className="card">
-                  <h2 className="card-title">Peso</h2>
+                  <h2 className="card-title flex items-center gap-1.5">
+                    <IconScale size={13} />
+                    Peso
+                  </h2>
                   <p className="stat mt-4">
                     {data.weight.currentKg ?? '—'}
                     {data.weight.currentKg && (
@@ -171,6 +236,13 @@ export default function HomePage() {
                       ? `meta de ${data.weight.targetKg} kg`
                       : 'meta não definida'}
                   </p>
+                  <Link
+                    href="/evolucao"
+                    className="mt-4 inline-flex items-center gap-1 text-xs text-accent underline-offset-2 hover:underline"
+                  >
+                    Ver evolução
+                    <IconChevronRight size={13} />
+                  </Link>
                 </section>
               </div>
 
@@ -182,7 +254,7 @@ export default function HomePage() {
                     <p className="text-sm text-ink-faint">Ainda sem registros nesta semana.</p>
                   ) : (
                     data.weeklyProgress.map((day) => {
-                      const weekday = new Date(`${day.dayKey}T12:00:00`).getDay();
+                      const weekday = dayKeyToDate(day.dayKey).getDay();
                       return (
                         <div key={day.dayKey} className="flex flex-1 flex-col items-center gap-1.5">
                           <span className="text-[10px] text-ink-faint">{WEEKDAYS[weekday]}</span>
@@ -207,6 +279,16 @@ export default function HomePage() {
                   Barra superior: treino · Barra inferior: meta de água
                 </p>
               </section>
+
+              {/* Último relatório da IA */}
+              {data.lastWeeklyReport?.summary && (
+                <section className="card mt-4 border-accent/20">
+                  <h2 className="card-title text-accent">Seu resumo da semana</h2>
+                  <p className="mt-3 text-sm leading-relaxed text-ink-muted">
+                    {data.lastWeeklyReport.summary}
+                  </p>
+                </section>
+              )}
 
               {/* Dicas */}
               {data.tips.length > 0 && (
