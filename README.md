@@ -99,8 +99,14 @@ A fonte da verdade continua aqui; o app fica com uma cópia versionada em
 
 ## Documentação
 
+> **Retomando o trabalho? Comece por [`docs/HANDOFF.md`](docs/HANDOFF.md).**
+> Ele registra o que está de fato rodando, o que está pendente (Docker,
+> banco local, n8n) e o que precisa ser blindado na API **antes** de
+> construir o front.
+
 | Documento                                                 | Conteúdo                                 |
 | --------------------------------------------------------- | ---------------------------------------- |
+| [**HANDOFF.md**](docs/HANDOFF.md)                         | **Estado atual, pendências e bloqueios** |
 | [architecture-overview.md](docs/architecture-overview.md) | Visão geral, diagramas C4                |
 | [adr/](docs/adr/)                                         | Decisões arquiteturais e seus porquês    |
 | [data-model.md](docs/data-model.md)                       | Entidades e relacionamentos              |
