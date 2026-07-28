@@ -11,7 +11,7 @@
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { api } from '@/lib/api';
-import { dayKeyToDate, formatTime } from '@/lib/format';
+import { dayKeyToDate, formatTime, formatWeight } from '@/lib/format';
 import { AppShell } from '@/components/app-shell';
 import { ProgressRing } from '@/components/progress-ring';
 import { QueryState } from '@/components/query-state';
@@ -226,14 +226,14 @@ export default function HomePage() {
                     Peso
                   </h2>
                   <p className="stat mt-4">
-                    {data.weight.currentKg ?? '—'}
+                    {data.weight.currentKg ? formatWeight(data.weight.currentKg) : '—'}
                     {data.weight.currentKg && (
                       <span className="ml-1 text-base font-normal text-ink-faint">kg</span>
                     )}
                   </p>
                   <p className="mt-1 text-xs text-ink-muted">
                     {data.weight.targetKg
-                      ? `meta de ${data.weight.targetKg} kg`
+                      ? `meta de ${formatWeight(data.weight.targetKg)} kg`
                       : 'meta não definida'}
                   </p>
                   <Link
