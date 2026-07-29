@@ -17,6 +17,10 @@ env:
   JWT_ACCESS_SECRET: ci-access-secret-not-used-in-production
   JWT_REFRESH_SECRET: ci-refresh-secret-not-used-in-production
   REDIS_URL: redis://localhost:6379
+  # Banco separado para as suítes e2e: elas truncam tabelas, e apontar
+  # para o banco principal apagaria o que os outros passos usam.
+  # A porta é 5432 (serviço do Actions), não 5433 (docker-compose local).
+  TEST_DATABASE_URL: postgresql://atlas:atlas@localhost:5432/atlas_test?schema=public
 
 jobs:
   quality:
@@ -49,9 +53,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Sem `version:` de propósito. A action lê o campo `packageManager`
+      # do package.json; declarar a versão nos dois lugares faz a v4
+      # abortar com "Multiple versions of pnpm specified" — foi o que
+      # derrubou o primeiro CI da main.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:
@@ -74,6 +80,11 @@ jobs:
 
       - name: Verificação de tipos
         run: pnpm typecheck
+
+      # `prisma migrate deploy` aplica migrations, mas não cria o banco.
+      # O serviço do Actions só cria o `atlas`; o `atlas_test` é nosso.
+      - name: Criar banco de testes
+        run: PGPASSWORD=atlas psql -h localhost -U atlas -d atlas -c 'CREATE DATABASE atlas_test;'
 
       - name: Testes
         run: pnpm test
