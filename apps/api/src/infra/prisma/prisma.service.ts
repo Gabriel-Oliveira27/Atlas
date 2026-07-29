@@ -149,7 +149,7 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
     return available ? client : null;
   }
 
-  /** true quando estamos em contingência (Neon substituindo o local). */
+  /** true quando estamos em contingência: o secundário substituindo o principal. */
   get isDegraded(): boolean {
     return this.router.isDegraded();
   }
