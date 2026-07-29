@@ -69,6 +69,16 @@ services:
       # Gere os JWT com: node infra/scripts/gerar-segredos.mjs
       - key: DATABASE_URL_CLOUD
         sync: false
+
+      # ATENÇÃO: aqui vai a MESMA string do Neon, não a do seu .env.
+      #
+      # O nome vem do ambiente de desenvolvimento, onde aponta para o
+      # Postgres do docker-compose — mas é ele o datasource do Prisma, e
+      # nesta máquina não existe Postgres local. Copiar o valor do .env
+      # (localhost:5433) faz a API subir, o health check estourar por
+      # timeout e o deploy morrer em "service unhealthy", sem dizer que o
+      # banco é inalcançável. O schema de ambiente recusa esse valor em
+      # produção justamente para o erro aparecer no boot, com explicação.
       - key: DATABASE_URL_LOCAL
         sync: false
       - key: JWT_ACCESS_SECRET

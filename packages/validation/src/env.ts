@@ -205,6 +205,26 @@ export const envSchema = z
         message: 'O banco Neon é obrigatório em produção (redundância e backup)',
       });
     }
+
+    /**
+     * `DATABASE_URL_LOCAL` é o datasource do Prisma — o nome vem do
+     * ambiente de desenvolvimento, onde ele aponta para o Postgres do
+     * docker-compose. Num serviço hospedado NÃO existe esse Postgres, e
+     * copiar o valor do `.env` é o erro natural de quem vê o nome.
+     *
+     * O sintoma sem esta trava é ruim de diagnosticar: a API sobe, o
+     * health check falha por timeout e o deploy é derrubado com
+     * "service unhealthy", sem dizer que o banco é inalcançável.
+     */
+    if (/@(localhost|127\.0\.0\.1|::1|host\.docker\.internal)[:/]/.test(env.DATABASE_URL_LOCAL)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['DATABASE_URL_LOCAL'],
+        message:
+          'Em produção esta variável não pode apontar para localhost — não existe Postgres na máquina do serviço. ' +
+          'Use a MESMA string do Neon que está em DATABASE_URL_CLOUD.',
+      });
+    }
   });
 
 export type AtlasEnv = z.infer<typeof envSchema>;

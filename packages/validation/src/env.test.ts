@@ -15,6 +15,21 @@ const MINIMO = {
   JWT_REFRESH_SECRET: 'segredo-de-teste-refresh-0123456789',
 } satisfies NodeJS.ProcessEnv;
 
+const NEON = 'postgresql://u:p@ep-abc-pooler.sa-east-1.aws.neon.tech/atlas?sslmode=require';
+
+/**
+ * Ambiente de produção válido. Note que o datasource aponta para o Neon,
+ * e não para localhost: num serviço hospedado não existe o Postgres do
+ * docker-compose, e o schema recusa esse valor.
+ */
+const PRODUCAO = {
+  NODE_ENV: 'production',
+  DATABASE_URL_LOCAL: NEON,
+  DATABASE_URL_CLOUD: NEON,
+  JWT_ACCESS_SECRET: 'producao-access-0123456789abcdef',
+  JWT_REFRESH_SECRET: 'producao-refresh-0123456789abcdef',
+} satisfies NodeJS.ProcessEnv;
+
 describe('porta da API', () => {
   it('usa 3333 quando nada é informado', () => {
     expect(parseEnv({ ...MINIMO }).API_PORT).toBe(3333);
@@ -40,15 +55,7 @@ describe('CORS_ALLOW_LAN', () => {
   });
 
   it('vem DESLIGADO em produção — origem privada ali é outra máquina do datacenter', () => {
-    const env = parseEnv({
-      ...MINIMO,
-      NODE_ENV: 'production',
-      JWT_ACCESS_SECRET: 'producao-access-0123456789abcdef',
-      JWT_REFRESH_SECRET: 'producao-refresh-0123456789abcdef',
-      DATABASE_URL_CLOUD: 'postgresql://u:p@host.neon.tech/atlas?sslmode=require',
-    });
-
-    expect(env.CORS_ALLOW_LAN).toBe(false);
+    expect(parseEnv({ ...PRODUCAO }).CORS_ALLOW_LAN).toBe(false);
   });
 
   it('respeita o valor explícito', () => {
@@ -59,23 +66,36 @@ describe('CORS_ALLOW_LAN', () => {
 describe('travas de produção', () => {
   it('recusa segredo de desenvolvimento', () => {
     expect(() =>
-      parseEnv({
-        ...MINIMO,
-        NODE_ENV: 'production',
-        JWT_ACCESS_SECRET: 'dev-only-nao-use-em-producao',
-        DATABASE_URL_CLOUD: 'postgresql://u:p@host.neon.tech/atlas?sslmode=require',
-      }),
+      parseEnv({ ...PRODUCAO, JWT_ACCESS_SECRET: 'dev-only-nao-use-em-producao' }),
     ).toThrow(/JWT_ACCESS_SECRET/);
   });
 
   it('exige o banco em nuvem — é a redundância', () => {
-    expect(() =>
-      parseEnv({
-        ...MINIMO,
-        NODE_ENV: 'production',
-        JWT_ACCESS_SECRET: 'producao-access-0123456789abcdef',
-        JWT_REFRESH_SECRET: 'producao-refresh-0123456789abcdef',
-      }),
-    ).toThrow(/DATABASE_URL_CLOUD/);
+    const { DATABASE_URL_CLOUD: _omitido, ...semNuvem } = PRODUCAO;
+
+    expect(() => parseEnv(semNuvem)).toThrow(/DATABASE_URL_CLOUD/);
+  });
+
+  /**
+   * O nome `DATABASE_URL_LOCAL` induz ao erro: em serviço hospedado não
+   * existe o Postgres do docker-compose, mas copiar o valor do `.env` é
+   * o reflexo natural. Sem esta trava a API sobe, o health check falha
+   * por timeout e o deploy é derrubado com "service unhealthy", sem
+   * dizer que o banco é inalcançável.
+   */
+  it.each([
+    'postgresql://atlas:senha@localhost:5433/atlas?schema=public',
+    'postgresql://atlas:senha@127.0.0.1:5432/atlas',
+    'postgresql://atlas:senha@host.docker.internal:5432/atlas',
+  ])('recusa datasource apontando para a própria máquina: %s', (url) => {
+    expect(() => parseEnv({ ...PRODUCAO, DATABASE_URL_LOCAL: url })).toThrow(/DATABASE_URL_LOCAL/);
+  });
+
+  it('aceita o datasource apontando para o Neon — é o esperado no hospedado', () => {
+    expect(parseEnv({ ...PRODUCAO }).DATABASE_URL_LOCAL).toBe(NEON);
+  });
+
+  it('em desenvolvimento, localhost segue sendo o normal', () => {
+    expect(parseEnv({ ...MINIMO }).DATABASE_URL_LOCAL).toContain('localhost');
   });
 });
