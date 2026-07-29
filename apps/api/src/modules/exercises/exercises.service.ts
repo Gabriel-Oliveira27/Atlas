@@ -74,10 +74,20 @@ export class ExercisesService {
     return { items, meta: buildPaginationMeta(page, pageSize, total) };
   }
 
-  /** Detalhe completo, com músculos, mídias, erros comuns e dicas. */
-  async findById(id: string) {
+  /**
+   * Detalhe completo, com músculos, mídias, erros comuns e dicas.
+   *
+   * O filtro por academia repete o da listagem de propósito: sem ele,
+   * bastava ter o id para ler um exercício exclusivo de outra unidade
+   * — a listagem escondia, o detalhe entregava.
+   */
+  async findById(id: string, gymId?: string | null) {
     const exercise = await this.prisma.db.exercise.findFirst({
-      where: { id, deletedAt: null },
+      where: {
+        id,
+        deletedAt: null,
+        ...(gymId ? { OR: [{ gymId: null }, { gymId }] } : { gymId: null }),
+      },
       include: {
         muscleGroup: true,
         muscleSubGroup: true,

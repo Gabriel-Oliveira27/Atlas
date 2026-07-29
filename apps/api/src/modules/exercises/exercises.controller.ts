@@ -38,7 +38,7 @@ export class ExercisesController {
   @Get(':id')
   @RequirePermissions(PERMISSIONS.EXERCISE_READ)
   @ApiOperation({ summary: 'Detalhe do exercício' })
-  async findOne(@Param('id') id: string) {
-    return this.exercisesService.findById(id);
+  async findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.exercisesService.findById(id, user.gymId);
   }
 }

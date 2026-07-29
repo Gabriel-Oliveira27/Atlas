@@ -1,7 +1,13 @@
 /** Blocos reutilizáveis usados pelos demais schemas. */
 
 import { z } from 'zod';
-import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@atlas/shared';
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+  isValidCpf,
+  normalizeCpf,
+  normalizePhone,
+} from '@atlas/shared';
 
 /** IDs do Atlas são cuid (padrão do Prisma). */
 export const cuidSchema = z.string().cuid({ message: 'Identificador inválido' });
@@ -23,6 +29,57 @@ export const dayKeySchema = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Data deve estar no formato YYYY-MM-DD' });
 
 export const urlSchema = z.string().url({ message: 'URL inválida' }).max(2048);
+
+/**
+ * CPF — validado pelos dígitos verificadores e guardado sem pontuação.
+ *
+ * O `transform` para a forma canônica é essencial: sem ele,
+ * "529.982.247-25" e "52998224725" gerariam duas contas distintas,
+ * cada uma passando na constraint de unicidade do banco.
+ */
+export const cpfSchema = z
+  .string()
+  .trim()
+  .refine(isValidCpf, { message: 'CPF inválido' })
+  .transform((value) => normalizeCpf(value) as string);
+
+/**
+ * Telefone brasileiro — guardado em E.164 (+55DDNNNNNNNNN).
+ * Mesma razão do CPF: uma conta, uma forma canônica.
+ */
+export const phoneSchema = z
+  .string()
+  .trim()
+  .refine((value) => normalizePhone(value) !== null, {
+    message: 'Telefone inválido. Use DDD + número, ex.: (11) 98888-7777',
+  })
+  .transform((value) => normalizePhone(value) as string);
+
+/**
+ * O que o usuário digita no campo único de login: e-mail, CPF ou
+ * telefone. A API resolve qual dos três é — a tela não pergunta.
+ */
+export const loginIdentifierSchema = z
+  .string()
+  .trim()
+  .min(1, 'Informe e-mail, CPF ou telefone')
+  .max(255);
+
+/**
+ * Senha do Atlas.
+ *
+ * O mínimo de 8 caracteres com letra e número é o piso que o
+ * `hashPassword` já exige; exigir símbolo obrigatório empurra o usuário
+ * para "Senha@123" — mais previsível, não mais forte. O comprimento
+ * máximo existe porque o bcrypt trunca em 72 bytes.
+ */
+export const passwordSchema = z
+  .string()
+  .min(8, 'A senha deve ter pelo menos 8 caracteres')
+  .max(72, 'A senha deve ter no máximo 72 caracteres')
+  .refine((value) => /[a-zA-Z]/.test(value) && /\d/.test(value), {
+    message: 'A senha deve conter ao menos uma letra e um número',
+  });
 
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),

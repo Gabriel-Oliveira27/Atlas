@@ -2,11 +2,16 @@
  * Rotas de IA e o webhook de retorno do N8N.
  */
 
-import { Body, Controller, Get, Headers, Post, RawBodyRequest, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Post, Query, RawBodyRequest, Req } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 import { verifyWebhookSignature } from '@atlas/auth';
-import { weeklyReportCallbackSchema, type WeeklyReportCallbackInput } from '@atlas/validation';
+import {
+  paginationSchema,
+  weeklyReportCallbackSchema,
+  type PaginationInput,
+  type WeeklyReportCallbackInput,
+} from '@atlas/validation';
 import {
   AppError,
   ERROR_CODES,
@@ -14,7 +19,12 @@ import {
   WEBHOOK_SIGNATURE_HEADER,
   type AuthenticatedUser,
 } from '@atlas/shared';
-import { CurrentUser, Public, RequirePermissions } from '../../common/decorators/index.js';
+import {
+  CurrentUser,
+  Public,
+  RequirePermissions,
+  ThrottleFamily,
+} from '../../common/decorators/index.js';
 import { zodBody } from '../../common/pipes/zod-validation.pipe.js';
 import { EnvConfig } from '../../config/env.config.js';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
@@ -30,12 +40,18 @@ export class AiController {
   ) {}
 
   @Get('reports')
-  @ApiOperation({ summary: 'Relatórios semanais do usuário' })
-  async listReports(@CurrentUser() user: AuthenticatedUser) {
-    return this.aiService.listReports(user.id);
+  @ApiOperation({ summary: 'Relatórios semanais do usuário (paginado)' })
+  async listReports(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query(zodBody(paginationSchema)) query: PaginationInput,
+  ) {
+    return this.aiService.listReports(user.id, query);
   }
 
+  // Cada geração é uma chamada paga ao provedor de IA: o limite é por
+  // usuário e por HORA, não por minuto.
   @Post('reports/generate')
+  @ThrottleFamily('ai')
   @RequirePermissions(PERMISSIONS.AI_REQUEST)
   @ApiOperation({ summary: 'Gera o relatório semanal sob demanda' })
   async generate(@CurrentUser() user: AuthenticatedUser) {

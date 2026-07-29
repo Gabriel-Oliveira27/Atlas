@@ -19,8 +19,9 @@ import {
   type ExceptionFilter,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { ZodError } from 'zod';
 import { AppError, ERROR_CODES, type ApiErrorResponse, type ErrorCode } from '@atlas/shared';
+import { isZodError } from '../errors/is-zod-error.js';
+import { REQUEST_ID_HEADER } from '../interceptors/response.interceptor.js';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -52,7 +53,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
       },
     };
 
-    void reply.status(status).send(body);
+    // O header acompanha o erro também: é justamente no erro que o
+    // usuário manda o print e alguém precisa achar a linha de log.
+    void reply.header(REQUEST_ID_HEADER, request.id).status(status).send(body);
   }
 
   private describe(exception: unknown): {
@@ -71,7 +74,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     // Erro de validação Zod → lista de campos inválidos.
-    if (exception instanceof ZodError) {
+    if (isZodError(exception)) {
       return {
         status: HttpStatus.UNPROCESSABLE_ENTITY,
         code: ERROR_CODES.VALIDATION_ERROR,

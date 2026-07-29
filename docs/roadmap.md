@@ -18,7 +18,12 @@ acompanhar hidratação e ver a evolução.
 | ----------------------------------------------------- | ------ |
 | Monorepo, Docker, banco local + Neon                  | ✅     |
 | Schema Prisma completo + seed                         | ✅     |
+| Login por e-mail, CPF ou telefone + senha             | ✅     |
 | Google OAuth + JWT com rotação + RBAC                 | ✅     |
+| Escopo por academia validado em toda rota             | ✅     |
+| Rate limit no Redis, por família de rota              | ✅     |
+| Idempotência e paginação em todo o contrato           | ✅     |
+| Testes e2e da API (65, contra Postgres real)          | ✅     |
 | Health check e failover local↔Neon                    | ✅     |
 | Perfil, preferências, histórico de peso               | ✅     |
 | Catálogo de exercícios (leitura)                      | ✅     |
@@ -115,11 +120,12 @@ achados críticos.
 
 Anotadas para não parecerem esquecimento:
 
-| Dívida                                     | Impacto                                           | Quando resolver                                |
-| ------------------------------------------ | ------------------------------------------------- | ---------------------------------------------- |
-| `ChangeLog` cresce sem expurgo             | Disco e desempenho da sincronização               | Beta                                           |
-| Sincronização usa agendador em memória     | Duas instâncias da API executariam em duplicidade | Ao escalar horizontalmente                     |
-| Swagger não deriva o corpo dos schemas Zod | Documentação menos precisa                        | Quando incomodar (avaliar `nestjs-zod`)        |
-| `bcryptjs` em vez de `argon2id`            | Hash mais fraco que o ideal                       | Ao habilitar login por e-mail                  |
-| Tombstones nunca removidos                 | Crescimento lento das tabelas                     | Definir política de retenção antes da Produção |
-| Sem teste de integração da sincronização   | Regressão poderia passar despercebida             | MVP (é o código mais delicado)                 |
+| Dívida                                                             | Impacto                                           | Quando resolver                                                                            |
+| ------------------------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `ChangeLog` cresce sem expurgo                                     | Disco e desempenho da sincronização               | Beta                                                                                       |
+| Sincronização usa agendador em memória                             | Duas instâncias da API executariam em duplicidade | Ao escalar horizontalmente                                                                 |
+| Swagger não deriva o corpo dos schemas Zod                         | Documentação menos precisa                        | Quando incomodar (avaliar `nestjs-zod`)                                                    |
+| `bcryptjs` em vez de `argon2id`                                    | Hash mais fraco que o ideal                       | Quando `argon2` compilar sem atrito no Windows — o `needsRehash` no login já migra sozinho |
+| Tombstones nunca removidos                                         | Crescimento lento das tabelas                     | Definir política de retenção antes da Produção                                             |
+| Cliente HTTP duplicado se o admin copiar `apps/web/src/lib/api.ts` | Duas cópias divergem na primeira correção         | Extrair para um package na primeira tela do painel                                         |
+| Rate limit degrada para memória se o Redis cair                    | O limite volta a ser por processo                 | Aceito: recusar tudo derrubaria a API junto                                                |

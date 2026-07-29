@@ -1,11 +1,15 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   finishWorkoutSessionSchema,
+  listWorkoutLogsQuerySchema,
   logSetSchema,
+  paginationSchema,
   startWorkoutSessionSchema,
   type FinishWorkoutSessionInput,
+  type ListWorkoutLogsQuery,
   type LogSetInput,
+  type PaginationInput,
   type StartWorkoutSessionInput,
 } from '@atlas/validation';
 import { PERMISSIONS, type AuthenticatedUser } from '@atlas/shared';
@@ -20,9 +24,12 @@ export class WorkoutsController {
 
   @Get('plans')
   @RequirePermissions(PERMISSIONS.WORKOUT_READ)
-  @ApiOperation({ summary: 'Planos de treino do usuário' })
-  async listPlans(@CurrentUser() user: AuthenticatedUser) {
-    return this.workoutsService.listPlans(user.id);
+  @ApiOperation({ summary: 'Planos de treino do usuário (paginado)' })
+  async listPlans(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query(zodBody(paginationSchema)) query: PaginationInput,
+  ) {
+    return this.workoutsService.listPlans(user.id, query);
   }
 
   @Get('plans/active')
@@ -51,9 +58,12 @@ export class WorkoutsController {
 
   @Get('sessions')
   @RequirePermissions(PERMISSIONS.WORKOUT_READ)
-  @ApiOperation({ summary: 'Histórico de sessões' })
-  async listSessions(@CurrentUser() user: AuthenticatedUser) {
-    return this.workoutsService.listSessions(user.id);
+  @ApiOperation({ summary: 'Histórico de sessões (paginado)' })
+  async listSessions(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query(zodBody(listWorkoutLogsQuerySchema)) query: ListWorkoutLogsQuery,
+  ) {
+    return this.workoutsService.listSessions(user, query);
   }
 
   @Post('sessions/:id/sets')

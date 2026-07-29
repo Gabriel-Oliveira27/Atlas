@@ -318,13 +318,27 @@ model User {
   name   String
   roleId String
 
-  /// Hash da senha. Nulo enquanto o login for exclusivamente por Google OAuth;
-  /// o campo já existe para o login por e-mail previsto no roadmap.
+  /// Hash da senha (bcrypt). Nulo em dois casos: a conta só entra por
+  /// Google OAuth, ou ainda não passou pelo primeiro acesso.
   passwordHash String?
+
+  /// Hash do código de ativação do primeiro acesso, e sua validade.
+  ///
+  /// Uma conta criada pela academia nasce sem senha. Deixar qualquer um
+  /// definir a senha sabendo só o CPF seria entregar a conta — CPF não
+  /// é segredo no Brasil. O código é entregue fora do canal (impresso,
+  /// no balcão, por mensagem) e some assim que é usado.
+  activationCodeHash  String?
+  activationExpiresAt DateTime?
+
+  /// CPF sem pontuação (11 dígitos). Único: é um dos três identificadores
+  /// de login, ao lado do e-mail e do telefone.
+  cpf String? @unique
 
   avatarUrl        String?
   avatarPublicId   String? // public_id do Cloudinary, necessário para excluir
-  phone            String?
+  /// Telefone em E.164 (+55DDNNNNNNNNN). Único pelo mesmo motivo do CPF.
+  phone            String? @unique
   birthDate        DateTime?  @db.Date
   sex              BiologicalSex   @default(UNDISCLOSED)
   heightCm         Float?
@@ -375,6 +389,8 @@ model User {
   auditLogs          AuditLog[]
 
   @@index([email])
+  @@index([cpf])
+  @@index([phone])
   @@index([roleId])
   @@index([deletedAt])
   @@index([updatedAt])
@@ -870,6 +886,10 @@ model SetLog {
   completedAt DateTime
   notes       String?
 
+  /// ID gerado no dispositivo. Sem ele, um retry da fila offline
+  /// duplicaria a série no treino do usuário.
+  clientGeneratedId String?
+
   version    Int       @default(1)
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
@@ -879,6 +899,7 @@ model SetLog {
   workoutLog WorkoutLog @relation(fields: [workoutLogId], references: [id], onDelete: Cascade)
   exercise   Exercise   @relation(fields: [exerciseId], references: [id])
 
+  @@unique([workoutLogId, clientGeneratedId])
   @@index([workoutLogId])
   @@index([exerciseId])
   @@map("set_logs")
@@ -978,6 +999,9 @@ model Assessment {
 
   notes String? @db.Text
 
+  /// ID gerado no dispositivo — idempotência no reenvio offline.
+  clientGeneratedId String?
+
   version    Int       @default(1)
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
@@ -989,6 +1013,7 @@ model Assessment {
   measurements BodyMeasurement[]
   photos       AssessmentPhoto[]
 
+  @@unique([userId, clientGeneratedId])
   @@index([userId, assessedAt])
   @@index([updatedAt])
   @@map("assessments")

@@ -53,9 +53,17 @@ export const envSchema = z
     API_HOST: z.string().default('0.0.0.0'),
     API_PREFIX: z.string().default('api'),
     API_PUBLIC_URL: z.string().url().default('http://localhost:3333'),
+    /**
+     * Allowlist de origens. 3000/3001 = app web, 3002 = painel admin.
+     * Uma origem que falta aqui é bloqueada pelo navegador com um erro
+     * de CORS que não menciona esta variável — vale conferir aqui antes
+     * de procurar no front.
+     */
     CORS_ORIGINS: z
       .string()
-      .default('http://localhost:3000,https://atlas.vercel.app')
+      .default(
+        'http://localhost:3000,http://localhost:3001,http://localhost:3002,https://atlas.vercel.app',
+      )
       .transform((value) =>
         value
           .split(',')
@@ -110,8 +118,23 @@ export const envSchema = z
     SYNC_RETRY_BACKOFF_MS: z.coerce.number().int().min(100).default(5_000),
 
     // ── Rate limit / logs ─────────────────────────────────────
+    // O limite padrão vale para leituras. As famílias abaixo cobrem as
+    // rotas cujo custo é diferente — apertar qualquer uma sob ataque não
+    // deveria exigir deploy. Ver `apps/api/src/config/throttle.config.ts`.
     RATE_LIMIT_TTL_SECONDS: z.coerce.number().int().min(1).default(60),
     RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(120),
+
+    /** Autenticação — alvo de força bruta. */
+    RATE_LIMIT_AUTH_MAX: z.coerce.number().int().min(1).default(10),
+    RATE_LIMIT_AUTH_TTL_MS: z.coerce.number().int().min(1000).default(60_000),
+
+    /** Sincronização — cargas grandes, custo alto por requisição. */
+    RATE_LIMIT_SYNC_MAX: z.coerce.number().int().min(1).default(10),
+    RATE_LIMIT_SYNC_TTL_MS: z.coerce.number().int().min(1000).default(60_000),
+
+    /** IA — cada chamada custa dinheiro real ao provedor. */
+    RATE_LIMIT_AI_MAX: z.coerce.number().int().min(1).default(5),
+    RATE_LIMIT_AI_TTL_MS: z.coerce.number().int().min(1000).default(3_600_000),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })
   // Em produção não se aceita rodar com os segredos de exemplo.

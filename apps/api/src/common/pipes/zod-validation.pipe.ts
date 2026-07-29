@@ -8,8 +8,8 @@
 
 import { Injectable, type ArgumentMetadata, type PipeTransform } from '@nestjs/common';
 import type { ZodSchema } from 'zod';
-import { ZodError } from 'zod';
 import { AppError } from '@atlas/shared';
+import { isZodError } from '../errors/is-zod-error.js';
 
 @Injectable()
 export class ZodValidationPipe implements PipeTransform {
@@ -19,7 +19,7 @@ export class ZodValidationPipe implements PipeTransform {
     try {
       return this.schema.parse(value);
     } catch (error) {
-      if (error instanceof ZodError) {
+      if (isZodError(error)) {
         throw AppError.validation('Dados inválidos', {
           issues: error.issues.map((issue) => ({
             path: issue.path.join('.'),

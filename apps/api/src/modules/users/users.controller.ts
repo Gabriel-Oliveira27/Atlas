@@ -3,10 +3,12 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   listUsersQuerySchema,
   logWeightSchema,
+  paginationSchema,
   updatePreferencesSchema,
   updateProfileSchema,
   type ListUsersQuery,
   type LogWeightInput,
+  type PaginationInput,
   type UpdatePreferencesInput,
   type UpdateProfileInput,
 } from '@atlas/validation';
@@ -60,9 +62,12 @@ export class UsersController {
   }
 
   @Get('me/weight/history')
-  @ApiOperation({ summary: 'Histórico de peso' })
-  async weightHistory(@CurrentUser() user: AuthenticatedUser) {
-    return this.usersService.getWeightHistory(user.id);
+  @ApiOperation({ summary: 'Histórico de peso (paginado)' })
+  async weightHistory(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query(zodBody(paginationSchema)) query: PaginationInput,
+  ) {
+    return this.usersService.getWeightHistory(user.id, query);
   }
 
   @Get()

@@ -38,7 +38,13 @@ export const assessmentPhotoSchema = z.object({
 });
 
 export const createAssessmentSchema = z.object({
+  /**
+   * Avaliado. Ausente = o próprio solicitante. Informar outro exige
+   * escopo sobre ele (mesma academia) — a API valida, não confia.
+   */
   userId: cuidSchema.optional(),
+  /** ID gerado no dispositivo — idempotência no reenvio offline. */
+  clientGeneratedId: z.string().max(64).optional(),
   assessedAt: z.coerce.date().default(() => new Date()),
   weightKg: weightKgSchema,
   heightCm: heightCmSchema,

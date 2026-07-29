@@ -33,7 +33,7 @@ export class ApiError extends Error {
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
-  /** Rotas públicas (health, dev-login) não enviam Authorization. */
+  /** Rotas públicas (health, login, cadastro) não enviam Authorization. */
   skipAuth?: boolean;
   signal?: AbortSignal;
 }

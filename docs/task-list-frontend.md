@@ -48,9 +48,37 @@ No app, os contratos vêm por `npm run sync:contracts` em vez de
 
 ### F1.2 Autenticação `[web] [mobile]`
 
+**Login por credenciais** (o caminho principal — já funciona):
+
+- **Um campo só** para o identificador, rotulado "E-mail, CPF ou
+  telefone". Não faça abas: o usuário não lembra com o que se cadastrou,
+  e escolher a aba errada vira um erro de login que não é dele.
+- `POST /api/auth/login` com `{ identifier, password, deviceId }`.
+- Máscara de CPF/telefone é opcional na digitação — a API normaliza. Se
+  aplicar máscara, **não** bloqueie e-mail no mesmo campo.
+- Erros a tratar pelo `code`:
+  - `INVALID_CREDENTIALS` → "E-mail, CPF, telefone ou senha incorretos".
+    Não diga "usuário não encontrado": a API não distingue os casos de
+    propósito, e a tela não deve inventar a distinção.
+  - `PASSWORD_NOT_SET` → "Esta conta entra com o Google" + botão do Google.
+  - `USER_INACTIVE` → conta desativada, orientar a procurar a academia.
+  - `RATE_LIMITED` → usar `error.details.retryAfterSeconds` no aviso.
+
+**Cadastro**: `POST /api/auth/register`. CPF e telefone são opcionais;
+em conflito, o `code` diz o campo exato (`EMAIL_ALREADY_REGISTERED`,
+`CPF_ALREADY_REGISTERED`, `PHONE_ALREADY_REGISTERED`) — destaque aquele
+campo, não o formulário inteiro.
+
+**Google OAuth** (aparece sozinho quando as credenciais existirem):
+
+- Ler `GET /api/auth/providers` e mostrar o botão só quando
+  `google === true`. Não condicione a variável de ambiente do front.
 - Botão "Entrar com Google" → `GET /api/auth/google`.
 - Página `/auth/callback`: ler o **fragmento** (`#access_token=...`),
   guardar os tokens e **limpar a URL** (`history.replaceState`).
+
+**Armazenamento dos tokens**:
+
 - Web: tokens em memória + refresh em cookie `httpOnly` quando possível.
 - Mobile: `expo-secure-store` (Keystore). **Nunca AsyncStorage** — é texto puro.
 - Deep link `atlasapp://auth/callback`.

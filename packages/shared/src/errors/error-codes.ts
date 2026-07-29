@@ -23,6 +23,18 @@ export const ERROR_CODES = {
   INSUFFICIENT_PERMISSIONS: 'INSUFFICIENT_PERMISSIONS',
   OAUTH_FAILED: 'OAUTH_FAILED',
 
+  // Cadastro e senha — códigos separados para o front destacar o campo
+  // exato do formulário em vez de um erro genérico.
+  EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
+  CPF_ALREADY_REGISTERED: 'CPF_ALREADY_REGISTERED',
+  PHONE_ALREADY_REGISTERED: 'PHONE_ALREADY_REGISTERED',
+  /** A conta existe, mas entrou por Google e ainda não definiu senha. */
+  PASSWORD_NOT_SET: 'PASSWORD_NOT_SET',
+  /** A conta nunca foi ativada: precisa passar pelo primeiro acesso. */
+  FIRST_ACCESS_REQUIRED: 'FIRST_ACCESS_REQUIRED',
+  /** Código de ativação errado, expirado ou já usado. */
+  ACTIVATION_CODE_INVALID: 'ACTIVATION_CODE_INVALID',
+
   // Domínio
   USER_INACTIVE: 'USER_INACTIVE',
   GYM_BLOCKED: 'GYM_BLOCKED',

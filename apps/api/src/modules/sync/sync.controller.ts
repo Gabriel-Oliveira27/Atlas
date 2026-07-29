@@ -28,7 +28,7 @@ import {
   type SyncRunSummary,
   type SyncStatusResponse,
 } from '@atlas/shared';
-import { CurrentUser, RequirePermissions } from '../../common/decorators/index.js';
+import { CurrentUser, RequirePermissions, ThrottleFamily } from '../../common/decorators/index.js';
 import { zodBody } from '../../common/pipes/zod-validation.pipe.js';
 import { SyncService } from './sync.service.js';
 import { DeviceSyncService } from './device-sync.service.js';
@@ -50,6 +50,7 @@ export class SyncController {
 
   @Post('trigger')
   @HttpCode(HttpStatus.ACCEPTED)
+  @ThrottleFamily('sync')
   @RequirePermissions(PERMISSIONS.SYNC_TRIGGER)
   @ApiOperation({ summary: 'Dispara uma sincronização manual' })
   async trigger(@Body(zodBody(triggerSyncSchema)) body: TriggerSyncInput): Promise<SyncRunSummary> {
@@ -64,6 +65,7 @@ export class SyncController {
   /** Dispositivo envia o que alterou enquanto estava offline. */
   @Post('push')
   @HttpCode(HttpStatus.OK)
+  @ThrottleFamily('sync')
   @ApiOperation({ summary: 'Envia alterações locais do dispositivo' })
   async push(
     @CurrentUser() user: AuthenticatedUser,
@@ -75,6 +77,7 @@ export class SyncController {
   /** Dispositivo busca o que mudou desde o último cursor. */
   @Post('pull')
   @HttpCode(HttpStatus.OK)
+  @ThrottleFamily('sync')
   @ApiOperation({ summary: 'Busca alterações do servidor desde o último cursor' })
   async pull(
     @CurrentUser() user: AuthenticatedUser,
