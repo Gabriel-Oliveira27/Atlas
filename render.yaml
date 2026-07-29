@@ -69,6 +69,24 @@ services:
       - key: NODE_VERSION
         value: '22'
 
+      # Silencia o "We could not find your Prisma schema in the default
+      # locations" que aparece no install.
+      #
+      # O `@prisma/client` tem um postinstall que tenta gerar o cliente
+      # sozinho, e ele procura o schema a partir do diretório do próprio
+      # pacote. Com pnpm esse diretório é
+      # `node_modules/.pnpm/@prisma+client@<versão>_.../node_modules/@prisma/client`,
+      # onde não existe `prisma/schema.prisma` nem o `package.json` do
+      # @atlas/database que aponta para ele — então o aviso é inevitável,
+      # não é sintoma de schema faltando.
+      #
+      # Quem gera o cliente de verdade é o `generate:ci` do buildCommand,
+      # com `--schema` explícito. Desligar o automático tira o aviso e
+      # uma etapa redundante do build; deixá-lo ligado não acrescenta
+      # nada, porque ele nunca acha o schema neste layout.
+      - key: PRISMA_SKIP_POSTINSTALL_GENERATE
+        value: '1'
+
       # Sem Postgres local aqui: o Neon é o principal desta instância.
       - key: DATABASE_PRIMARY
         value: CLOUD
