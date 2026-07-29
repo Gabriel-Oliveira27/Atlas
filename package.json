@@ -28,6 +28,7 @@
     "db:seed": "pnpm --filter @atlas/database seed",
     "db:studio": "pnpm --filter @atlas/database studio",
     "api:dev": "pnpm --filter @atlas/api dev",
+    "api:expose": "node infra/scripts/expose-api.mjs",
     "bootstrap": "node infra/scripts/bootstrap.mjs",
     "prepare": "husky"
   },

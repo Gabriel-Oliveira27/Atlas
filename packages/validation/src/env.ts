@@ -58,11 +58,17 @@ export const envSchema = z
      * Uma origem que falta aqui é bloqueada pelo navegador com um erro
      * de CORS que não menciona esta variável — vale conferir aqui antes
      * de procurar no front.
+     *
+     * Aceita curinga em um rótulo do host: `https://*.vercel.app` cobre
+     * os deploys de preview, que ganham domínio novo a cada branch, e
+     * `https://*.trycloudflare.com` cobre o túnel de desenvolvimento,
+     * cujo subdomínio é sorteado a cada execução. A comparação é por
+     * rótulo — ver `apps/api/src/config/cors.ts`.
      */
     CORS_ORIGINS: z
       .string()
       .default(
-        'http://localhost:3000,http://localhost:3001,http://localhost:3002,https://atlas.vercel.app',
+        'http://localhost:3000,http://localhost:3001,http://localhost:3002,https://*.vercel.app,https://*.trycloudflare.com',
       )
       .transform((value) =>
         value
@@ -70,6 +76,18 @@ export const envSchema = z
           .map((origin) => origin.trim())
           .filter(Boolean),
       ),
+
+    /**
+     * Libera origens da rede local (192.168.x, 10.x, 172.16–31.x).
+     *
+     * É o que permite abrir o web pelo celular no mesmo Wi-Fi sem
+     * cadastrar o IP — que muda quando o roteador renova o DHCP.
+     *
+     * O padrão segue o ambiente: ligado em desenvolvimento, desligado em
+     * produção. Num servidor, uma origem "privada" não é o seu notebook,
+     * é outra máquina do datacenter.
+     */
+    CORS_ALLOW_LAN: z.enum(['true', 'false']).optional(),
 
     // ── JWT ───────────────────────────────────────────────────
     JWT_ACCESS_SECRET: z.string().min(16, 'Segredo do access token muito curto'),
@@ -137,6 +155,18 @@ export const envSchema = z
     RATE_LIMIT_AI_TTL_MS: z.coerce.number().int().min(1000).default(3_600_000),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })
+  /**
+   * `CORS_ALLOW_LAN` é opcional no ambiente e resolvido aqui: quem não
+   * definir nada ganha o comportamento seguro por padrão — liberado em
+   * desenvolvimento, bloqueado em produção. Deixar o default no campo
+   * não daria acesso ao `NODE_ENV`.
+   */
+  .transform((env) => ({
+    ...env,
+    CORS_ALLOW_LAN: env.CORS_ALLOW_LAN
+      ? env.CORS_ALLOW_LAN === 'true'
+      : env.NODE_ENV !== 'production',
+  }))
   // Em produção não se aceita rodar com os segredos de exemplo.
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return;

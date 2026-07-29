@@ -7,6 +7,7 @@
 
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
+import { networkInterfaces } from 'node:os';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -16,6 +17,7 @@ import cookie from '@fastify/cookie';
 import { parseEnv } from '@atlas/validation';
 import { APP_NAME } from '@atlas/shared';
 import { AppModule } from './app.module.js';
+import { buildCorsOrigin } from './config/cors.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { HttpMetricsInterceptor } from './common/interceptors/http-metrics.interceptor.js';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor.js';
@@ -70,7 +72,7 @@ async function bootstrap(): Promise<void> {
   await app.register(cookie as never);
 
   app.enableCors({
-    origin: env.CORS_ORIGINS,
+    origin: buildCorsOrigin(env.CORS_ORIGINS, { allowPrivateNetwork: env.CORS_ALLOW_LAN }),
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   });
@@ -106,9 +108,25 @@ async function bootstrap(): Promise<void> {
 
   const logger = app.get(Logger);
   logger.log(`Atlas API em http://localhost:${env.API_PORT}/${env.API_PREFIX}`);
+
   if (env.NODE_ENV !== 'production') {
     logger.log(`Documentação em http://localhost:${env.API_PORT}/docs`);
+
+    // Anuncia os endereços de rede local: é exatamente o valor que o
+    // aplicativo precisa em EXPO_PUBLIC_API_URL, e descobri-lo por
+    // `ipconfig` toda vez que o DHCP renova custa mais do que imprimir.
+    for (const address of listLanAddresses()) {
+      logger.log(`Alcançável na rede local em http://${address}:${env.API_PORT}/${env.API_PREFIX}`);
+    }
   }
+}
+
+/** IPv4 das interfaces de rede, sem loopback nem interfaces virtuais. */
+function listLanAddresses(): string[] {
+  return Object.values(networkInterfaces())
+    .flatMap((entries) => entries ?? [])
+    .filter((entry) => entry.family === 'IPv4' && !entry.internal)
+    .map((entry) => entry.address);
 }
 
 void bootstrap();
