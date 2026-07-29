@@ -1,12 +1,17 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "stream",
+  "//": "globalEnv não é documentação: o turbo 2 repassa às tarefas SOMENTE as variáveis declaradas aqui. Uma que falte não chega ao processo, e o efeito é o código cair no valor padrão sem avisar — foi assim que o CI quebrou, com TEST_DATABASE_URL ausente e a suíte tentando a porta 5433 (docker local) num ambiente que só tem a 5432. Ao ler uma variável nova em build/lint/typecheck/test, acrescente-a.",
   "globalEnv": [
+    "CI",
     "NODE_ENV",
     "DATABASE_URL_LOCAL",
     "DATABASE_URL_CLOUD",
     "DATABASE_PRIMARY",
-    "REDIS_URL"
+    "TEST_DATABASE_URL",
+    "REDIS_URL",
+    "JWT_ACCESS_SECRET",
+    "JWT_REFRESH_SECRET"
   ],
   "globalDependencies": ["**/.env", "tsconfig.base.json"],
   "tasks": {
