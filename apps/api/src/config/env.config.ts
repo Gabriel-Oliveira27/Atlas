@@ -130,7 +130,22 @@ export class EnvConfig {
     return { baseUrl: this.env.N8N_BASE_URL, webhookSecret: this.env.N8N_WEBHOOK_SECRET };
   }
 
+  /**
+   * Limites de requisição.
+   *
+   * `default` vale para leituras; as demais famílias cobrem rotas cujo
+   * custo é diferente e só se aplicam onde `@ThrottleFamily` declarar.
+   * Ver `config/throttle.config.ts`.
+   */
   get rateLimit() {
-    return { ttlSeconds: this.env.RATE_LIMIT_TTL_SECONDS, max: this.env.RATE_LIMIT_MAX };
+    return {
+      ttlSeconds: this.env.RATE_LIMIT_TTL_SECONDS,
+      max: this.env.RATE_LIMIT_MAX,
+      families: {
+        auth: { limit: this.env.RATE_LIMIT_AUTH_MAX, ttl: this.env.RATE_LIMIT_AUTH_TTL_MS },
+        sync: { limit: this.env.RATE_LIMIT_SYNC_MAX, ttl: this.env.RATE_LIMIT_SYNC_TTL_MS },
+        ai: { limit: this.env.RATE_LIMIT_AI_MAX, ttl: this.env.RATE_LIMIT_AI_TTL_MS },
+      },
+    };
   }
 }

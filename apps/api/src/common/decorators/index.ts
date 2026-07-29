@@ -9,6 +9,7 @@ import type { AuthenticatedUser, Permission, Role } from '@atlas/shared';
 export const IS_PUBLIC_KEY = 'atlas:is-public';
 export const ROLES_KEY = 'atlas:roles';
 export const PERMISSIONS_KEY = 'atlas:permissions';
+export const THROTTLE_FAMILY_KEY = 'atlas:throttle-family';
 
 /**
  * Marca a rota como pública.
@@ -27,6 +28,16 @@ export const Roles = (...roles: Role[]): MethodDecorator & ClassDecorator =>
 export const RequirePermissions = (
   ...permissions: Permission[]
 ): MethodDecorator & ClassDecorator => SetMetadata(PERMISSIONS_KEY, permissions);
+
+/**
+ * Coloca a rota sob um limite de requisição específico.
+ *
+ * Sem isto a rota fica no limite padrão (leituras em geral). Ver
+ * `config/throttle.config.ts` — inclusive a nota sobre por que NÃO
+ * basta declarar o throttler no módulo.
+ */
+export const ThrottleFamily = (family: 'auth' | 'sync' | 'ai'): MethodDecorator & ClassDecorator =>
+  SetMetadata(THROTTLE_FAMILY_KEY, family);
 
 /** Injeta o usuário autenticado: `@CurrentUser() user: AuthenticatedUser`. */
 export const CurrentUser = createParamDecorator(

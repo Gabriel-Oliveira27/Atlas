@@ -5,14 +5,19 @@
  * padrão é rota protegida, e abrir uma rota exige `@Public()` explícito.
  */
 
+import { randomUUID } from 'node:crypto';
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
+import { AtlasThrottlerGuard } from './common/guards/atlas-throttler.guard.js';
+import { ScopeModule } from './common/scope/scope.module.js';
 import { EnvConfig } from './config/env.config.js';
+import { buildThrottlers } from './config/throttle.config.js';
 import { PrismaModule } from './infra/prisma/prisma.module.js';
 import { RedisModule } from './infra/redis/redis.module.js';
+import { RedisThrottlerStorage } from './infra/redis/throttler-redis.storage.js';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
 import { RbacGuard } from './modules/auth/guards/rbac.guard.js';
 import { AuthModule } from './modules/auth/auth.module.js';
@@ -39,27 +44,53 @@ const config = new EnvConfig();
         ...(config.isProduction
           ? {}
           : { transport: { target: 'pino-pretty', options: { singleLine: true } } }),
+
+        /**
+         * O id da requisição é definido pelo `genReqId` do Fastify (ver
+         * `main.ts`), que o escreve de volta no header de entrada. Aqui
+         * apenas o reaproveitamos, para que a linha de log, o envelope
+         * da resposta e o header `x-request-id` carreguem o MESMO valor
+         * — que é a única razão de o campo existir.
+         */
+        genReqId: (req) => {
+          const incoming = req.headers['x-request-id'];
+          return (Array.isArray(incoming) ? incoming[0] : incoming) ?? randomUUID();
+        },
+
+        // A latência por rota é medida pelo `HttpMetricsInterceptor`,
+        // que enxerga a rota normalizada do Fastify — o logger recebe a
+        // requisição crua, onde essa informação não existe.
+
         // Nunca registrar credenciais no log.
         redact: [
           'req.headers.authorization',
           'req.headers.cookie',
           'req.body.refreshToken',
           'req.body.password',
+          'req.body.newPassword',
+          'req.body.currentPassword',
         ],
       },
     }),
 
-    ThrottlerModule.forRoot([
-      {
-        ttl: config.rateLimit.ttlSeconds * 1000,
-        limit: config.rateLimit.max,
-      },
-    ]),
+    // Rate limit com contador COMPARTILHADO no Redis (ver
+    // `RedisThrottlerStorage`) e um throttler por família de rota (ver
+    // `throttle.config.ts`). Sem `name`, o throttler é o padrão que vale
+    // para toda rota que não declarar outro.
+    ThrottlerModule.forRootAsync({
+      imports: [RedisModule],
+      inject: [RedisThrottlerStorage],
+      useFactory: (storage: RedisThrottlerStorage) => ({
+        storage,
+        throttlers: buildThrottlers(config),
+      }),
+    }),
 
     ScheduleModule.forRoot(),
 
     PrismaModule,
     RedisModule,
+    ScopeModule,
 
     AuthModule,
     HealthModule,
@@ -76,7 +107,9 @@ const config = new EnvConfig();
   providers: [
     EnvConfig,
     // A ordem importa: rate limit → autenticação → autorização.
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // O rate limit vem primeiro de propósito: se viesse depois, uma
+    // enxurrada de tokens inválidos tomaria 401 sem nunca ser limitada.
+    { provide: APP_GUARD, useClass: AtlasThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RbacGuard },
   ],

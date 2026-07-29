@@ -19,8 +19,21 @@ import {
   type AiFactoryConfig,
   type WeeklyReportContext,
 } from '@atlas/ai';
-import { AppError, ERROR_CODES, startOfWeek, toDayKey, type AiProviderName } from '@atlas/shared';
-import { weeklyReportPayloadSchema, type WeeklyReportPayload } from '@atlas/validation';
+import {
+  AppError,
+  ERROR_CODES,
+  buildPaginationMeta,
+  normalizePagination,
+  startOfWeek,
+  toDayKey,
+  type AiProviderName,
+  type PaginatedResult,
+} from '@atlas/shared';
+import {
+  weeklyReportPayloadSchema,
+  type PaginationInput,
+  type WeeklyReportPayload,
+} from '@atlas/validation';
 import { EnvConfig } from '../../config/env.config.js';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 
@@ -304,22 +317,35 @@ export class AiService {
    * tipos internos do Prisma que não são "nomeáveis" a partir de outro
    * package no pnpm (TS2742).
    */
-  async listReports(userId: string, limit = 12): Promise<WeeklyReportSummary[]> {
-    return this.prisma.db.weeklyReport.findMany({
-      where: { userId, deletedAt: null },
-      orderBy: { periodStart: 'desc' },
-      take: limit,
-      select: {
-        id: true,
-        periodStart: true,
-        periodEnd: true,
-        status: true,
-        summary: true,
-        positives: true,
-        negatives: true,
-        pdfUrl: true,
-        generatedAt: true,
-      },
-    });
+  async listReports(
+    userId: string,
+    query: PaginationInput,
+  ): Promise<PaginatedResult<WeeklyReportSummary>> {
+    const { page, pageSize, skip, take } = normalizePagination(query);
+    const db = this.prisma.db;
+    const where = { userId, deletedAt: null };
+
+    const [items, total] = await Promise.all([
+      db.weeklyReport.findMany({
+        where,
+        orderBy: { periodStart: 'desc' },
+        skip,
+        take,
+        select: {
+          id: true,
+          periodStart: true,
+          periodEnd: true,
+          status: true,
+          summary: true,
+          positives: true,
+          negatives: true,
+          pdfUrl: true,
+          generatedAt: true,
+        },
+      }),
+      db.weeklyReport.count({ where }),
+    ]);
+
+    return { items, meta: buildPaginationMeta(page, pageSize, total) };
   }
 }

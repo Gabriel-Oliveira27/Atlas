@@ -142,11 +142,33 @@ pesagens diárias produziria um gráfico ruidoso sem ganho de informação.
 ### Idempotência offline
 
 ```prisma
-@@unique([userId, clientGeneratedId])
+@@unique([userId, clientGeneratedId])          // HydrationLog, WorkoutLog, Assessment
+@@unique([workoutLogId, clientGeneratedId])    // SetLog
 ```
 
-Em `HydrationLog` e `WorkoutLog`. É o que impede o mesmo registro de ser
-contado duas vezes quando a sincronização reenvia.
+Em **todas** as escritas que a fila offline reenvia. É o que impede o
+mesmo registro de ser contado duas vezes quando a sincronização repete —
+e a fila **vai** repetir; sem isso, cada retry vira uma série a mais no
+treino do usuário.
+
+`SetLog` é escopado pela sessão, não pelo usuário: o id gerado no
+dispositivo só precisa ser único dentro do treino em que a série
+aconteceu.
+
+### Três identificadores de login
+
+```prisma
+email String  @unique
+cpf   String? @unique   // 11 dígitos, sem pontuação
+phone String? @unique   // E.164: +55DDNNNNNNNNN
+passwordHash String?    // nulo = a conta só entra por Google
+```
+
+Os três apontam para a mesma conta, e o usuário entra por qualquer um
+deles. A **forma canônica** no banco não é cosmética: a constraint de
+unicidade compara strings, então `529.982.247-25` e `52998224725`
+passariam as duas e criariam contas separadas. A normalização acontece
+no schema Zod, antes de qualquer consulta — ver `docs/auth-security.md`.
 
 ---
 
@@ -194,12 +216,12 @@ Criadas pelo init do Docker:
 
 ## Índices relevantes
 
-| Tabela             | Índice                                      | Consulta que atende               |
-| ------------------ | ------------------------------------------- | --------------------------------- |
-| `users`            | `email`, `deletedAt`, `updatedAt`           | Login; pull da sincronização      |
-| `hydration_logs`   | `(userId, dayKey)`                          | Resumo do dia (rota mais chamada) |
-| `workout_logs`     | `(userId, startedAt)`, `status`             | Histórico; sessão aberta          |
-| `exercises`        | `muscleGroupId`, `isActive`, `name`         | Filtros do catálogo               |
-| `change_logs`      | `(status, occurredAt)`                      | Fila da sincronização             |
-| `daily_activities` | `(userId, dayKey)` único                    | Home                              |
-| `audit_logs`       | `action`, `(entity, entityId)`, `createdAt` | Auditoria                         |
+| Tabela             | Índice                                            | Consulta que atende                 |
+| ------------------ | ------------------------------------------------- | ----------------------------------- |
+| `users`            | `email`, `cpf`, `phone`, `deletedAt`, `updatedAt` | Login pelos 3 identificadores; pull |
+| `hydration_logs`   | `(userId, dayKey)`                                | Resumo do dia (rota mais chamada)   |
+| `workout_logs`     | `(userId, startedAt)`, `status`                   | Histórico; sessão aberta            |
+| `exercises`        | `muscleGroupId`, `isActive`, `name`               | Filtros do catálogo                 |
+| `change_logs`      | `(status, occurredAt)`                            | Fila da sincronização               |
+| `daily_activities` | `(userId, dayKey)` único                          | Home                                |
+| `audit_logs`       | `action`, `(entity, entityId)`, `createdAt`       | Auditoria                           |

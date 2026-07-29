@@ -16,7 +16,12 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { findSyncEntity, syncEntitiesInOrder, type PrismaClient } from '@atlas/database';
+import {
+  findSyncEntity,
+  syncEntitiesInOrder,
+  type PrismaClient,
+  type SyncEntityDefinition,
+} from '@atlas/database';
 import {
   CHANGE_OPERATION,
   CONFLICT_RESOLUTION,
@@ -70,7 +75,10 @@ export class DeviceSyncService {
         continue;
       }
 
-      // Verificação de posse: o registro precisa ser do usuário do token.
+      // Verificação de posse do que o cliente AFIRMA ser dele. A posse
+      // do registro que já existe no servidor é conferida dentro de
+      // `applyDeviceChange` — ver a nota lá sobre por que as duas são
+      // necessárias.
       if (definition.userScopeField) {
         const ownerId =
           definition.userScopeField === 'id'
@@ -93,9 +101,11 @@ export class DeviceSyncService {
       }
 
       try {
-        const outcome = await this.applyDeviceChange(db, change, definition.resolution);
+        const outcome = await this.applyDeviceChange(db, userId, change, definition);
 
-        if (outcome.conflict) {
+        if (outcome.rejection) {
+          rejected.push(outcome.rejection);
+        } else if (outcome.conflict) {
           conflicts.push(outcome.conflict);
         } else {
           accepted += 1;
@@ -193,18 +203,15 @@ export class DeviceSyncService {
 
   private async applyDeviceChange(
     db: PrismaClient,
+    userId: string,
     change: SyncPushInput['changes'][number],
-    resolution: string,
-  ): Promise<{ conflict?: SyncConflictReport }> {
-    const definition = findSyncEntity(change.entity);
-    if (!definition) throw new Error(`Entidade desconhecida: ${change.entity}`);
-
+    definition: SyncEntityDefinition,
+  ): Promise<{ conflict?: SyncConflictReport; rejection?: SyncRejection }> {
     const delegate = (db as unknown as Record<string, PushDelegate>)[definition.delegate as string];
     if (!delegate) throw new Error(`Delegate ausente: ${String(definition.delegate)}`);
 
-    const existing = (await delegate.findUnique({ where: { id: change.entityId } })) as {
-      version?: number;
-    } | null;
+    const existing = (await delegate.findUnique({ where: { id: change.entityId } })) as
+      (Record<string, unknown> & { version?: number }) | null;
 
     const payload = { ...change.payload } as Record<string, unknown>;
     // O cliente não define estes campos: quem manda é o servidor.
@@ -226,10 +233,43 @@ export class DeviceSyncService {
       return {};
     }
 
+    // Posse do registro que JÁ EXISTE no servidor.
+    //
+    // A checagem em `push` valida o dono declarado no payload, que é
+    // texto vindo do cliente. Sem esta segunda checagem, bastava enviar
+    // `entityId` de um registro alheio com `userId` próprio no payload:
+    // a primeira passava, e o update reescrevia — e reatribuía — o dado
+    // de outra pessoa.
+    if (definition.userScopeField) {
+      const currentOwner =
+        definition.userScopeField === 'id'
+          ? (existing.id as string)
+          : (existing[definition.userScopeField] as string | undefined);
+
+      if (currentOwner !== userId) {
+        this.logger.warn(
+          { userId, entity: change.entity, entityId: change.entityId },
+          'Dispositivo tentou sobrescrever registro existente de outro usuário — rejeitado.',
+        );
+
+        return {
+          rejection: {
+            entity: change.entity,
+            entityId: change.entityId,
+            reason: 'Registro não pertence ao usuário autenticado',
+            code: ERROR_CODES.FORBIDDEN,
+          },
+        };
+      }
+
+      // Reatribuir dono via sincronização nunca é legítimo.
+      delete payload[definition.userScopeField];
+    }
+
     const existingVersion = existing.version ?? 0;
 
     // Append-only: o registro já existe com o mesmo id — nada a fazer.
-    if (resolution === CONFLICT_RESOLUTION.MERGE_UNION) return {};
+    if (definition.resolution === CONFLICT_RESOLUTION.MERGE_UNION) return {};
 
     if (change.version > existingVersion) {
       await delegate.update({
@@ -245,20 +285,48 @@ export class DeviceSyncService {
     }
 
     if (change.version === existingVersion) {
-      return {
-        conflict: {
-          entity: change.entity,
-          entityId: change.entityId,
-          localVersion: change.version,
-          remoteVersion: existingVersion,
-          resolution: CONFLICT_RESOLUTION.LAST_WRITE_WINS,
-          requiresManualReview: false,
-        },
+      const conflict: SyncConflictReport = {
+        entity: change.entity,
+        entityId: change.entityId,
+        localVersion: change.version,
+        remoteVersion: existingVersion,
+        resolution: CONFLICT_RESOLUTION.LAST_WRITE_WINS,
+        requiresManualReview: false,
       };
+
+      // Registrar o conflito é o ponto: antes ele só aparecia na
+      // resposta daquela requisição e sumia. Persistido, os dois lados
+      // ficam disponíveis para inspeção — nenhum dado se perde em
+      // silêncio, que é a regra do protocolo (ver docs/offline-sync.md).
+      await this.recordConflict(db, change, existing, existingVersion);
+
+      return { conflict };
     }
 
     // Alteração antiga: o servidor já tem versão mais nova. Descartada.
     return {};
+  }
+
+  /** Guarda os dois lados da divergência para inspeção posterior. */
+  private async recordConflict(
+    db: PrismaClient,
+    change: SyncPushInput['changes'][number],
+    serverRecord: Record<string, unknown>,
+    serverVersion: number,
+  ): Promise<void> {
+    await db.syncConflict.create({
+      data: {
+        entity: change.entity,
+        entityId: change.entityId,
+        localVersion: change.version,
+        cloudVersion: serverVersion,
+        localPayload: change.payload as never,
+        cloudPayload: serverRecord as never,
+        resolution: CONFLICT_RESOLUTION.LAST_WRITE_WINS,
+        resolved: false,
+        note: 'Divergência de versão em push de dispositivo',
+      },
+    });
   }
 
   private async updateCursor(

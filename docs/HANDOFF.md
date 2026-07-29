@@ -1,7 +1,8 @@
 # Handoff — estado real do Atlas
 
-> Escrito em **28/07/2026**, ao fim da sessão de fundação.
-> Commits: `c687d75` (principal, 189 arquivos) · `2ef7a5b` (app, 38 arquivos).
+> Atualizado em **28/07/2026**, ao fim da sessão de blindagem pré-front.
+> A sessão anterior (fundação) deixou §2 e §3 em aberto; ambos foram
+> resolvidos e o registro está abaixo.
 > **Nada foi enviado ao GitHub** — os dois repositórios têm apenas commits locais.
 
 Este documento existe para você não precisar redescobrir o que já foi
@@ -10,102 +11,62 @@ decidido, nem confiar em suposições sobre o que funciona. Ele separa
 
 ---
 
-## 1. Verificado funcionando (eu cliquei e vi)
+## 1. Verificado funcionando
 
-| Item                    | Como foi comprovado                                                      |
-| ----------------------- | ------------------------------------------------------------------------ |
-| API no ar               | `GET /api/health` respondendo na porta **3333**                          |
-| Neon conectado          | health reporta `up`, latência 115–665 ms                                 |
-| Migrations no Neon      | `00000000000000_init` aplicada (1282 linhas de SQL)                      |
-| Seed no Neon            | 24 permissões, 4 papéis, 7 grupos musculares, 12 exercícios, 3 dicas     |
-| Front no ar             | Next.js na porta **3001** (a 3000 está ocupada — ver §6)                 |
-| Login de dev            | Emite sessão de SUPER_ADMIN; a sidebar mostra o usuário do seed          |
-| Home                    | Consome `/api/home`; mostrou hidratação, treino, streak, peso e dicas    |
-| Hidratação **gravando** | Cliquei em 500 ml → anel foi a 20%, entrada apareceu, persistiu no Neon  |
-| Exercícios              | 12 do seed, com grupo, equipamento e notas de estímulo                   |
-| Status                  | Reflete o estado real das 3 dependências                                 |
-| **Failover automático** | Postgres local fora → API assumiu o Neon sozinha e a UI avisou o usuário |
-| Typecheck e testes      | API e web sem erro; 33 testes passando                                   |
+| Item                    | Como foi comprovado                                                        |
+| ----------------------- | -------------------------------------------------------------------------- |
+| API no ar               | `GET /api/health` respondendo, banco ativo `LOCAL`                         |
+| **Docker de pé**        | 5 containers: postgres, redis, n8n, pgadmin, minio                         |
+| Neon conectado          | health reporta `up`, latência ~116 ms                                      |
+| Migrations              | `00000000000000_init` + `20260728010000_login_credenciais_e_idempotencia`  |
+| Seed no banco local     | 24 permissões, 4 papéis, 7 grupos musculares, 12 exercícios, 3 dicas       |
+| n8n                     | `GET localhost:5678/healthz` → 200                                         |
+| **Login por senha**     | `POST /auth/login` com o admin do seed → sessão emitida                    |
+| **dev-login removido**  | a rota devolve 404                                                         |
+| Paginação               | `/exercises?pageSize=3` → `meta.pagination` completo; `100000` → 422       |
+| requestId               | `x-request-id` enviado volta no header E no envelope                       |
+| **Failover automático** | Postgres local fora → API assumiu o Neon sozinha e a UI avisou o usuário   |
+| Painel admin            | `pnpm --filter @atlas/admin dev` na **3002**, renderiza e faz `next build` |
+| Typecheck               | `pnpm -r run typecheck` limpo — **sem precisar de filtro**                 |
+| Lint                    | `pnpm -r run lint` limpo nos 9 projetos                                    |
+| Formatação              | `prettier --check` limpo                                                   |
+| **Testes**              | **131 passando** — 66 nos packages, 65 e2e da API                          |
 
 O failover não foi um teste encenado: o banco local estava realmente
-fora, e o sistema se comportou como projetado. É a única parte da
-estratégia offline-first que já tem prova de funcionamento.
+fora, e o sistema se comportou como projetado.
 
 ---
 
-## 2. PENDENTE — Docker (bloqueia o banco local e o n8n)
+## 2. Docker — RESOLVIDO
 
-**Nada de Docker está rodando.** Nenhum container foi criado, nenhuma
-imagem baixada. O `docker-compose.yml` existe e está completo, mas
-**nunca foi executado**.
+Os 5 containers subiram e estão de pé:
 
-### O que já foi consertado nesta sessão
-
-O Docker Desktop não abria. Três causas, todas resolvidas:
-
-1. **7 processos zumbis** (3× Docker Desktop, 2× backend, 2× docker-ai) — encerrados.
-2. **`%LOCALAPPDATA%\Docker\run\dockerInference`** corrompido — o arquivo
-   não podia ser lido nem excluído. Resolvido **renomeando a pasta**
-   (`run.quebrado-<timestamp>`) e deixando o Docker recriá-la.
-3. **`%LOCALAPPDATA%\docker-secrets-engine\engine.sock`** — mesmo defeito,
-   mesma solução.
-
-Após isso, ambos os sockets foram recriados com sucesso e os diálogos de
-erro pararam. **Se um erro parecido reaparecer em outro socket, aplique a
-mesma receita:** feche o Docker, renomeie a pasta que contém o socket,
-recrie-a vazia, reabra.
-
-### O que falta — exige o usuário
-
-O serviço `com.docker.service` está **parado** (`StartupType: Manual`). O
-prompt do UAC foi cancelado 3 vezes; ele não chega ao usuário pelo
-processo do agente. **Não insista por ferramenta** — peça ao usuário para
-abrir o PowerShell **como administrador** e rodar:
-
-```powershell
-Set-Service com.docker.service -StartupType Automatic; Start-Service com.docker.service
-```
-
-### Armadilha: o WSL está sem distribuição
-
-`wsl -l -v` retorna **"não tem distribuições instaladas"**. O Docker
-Desktop usa backend WSL2 e precisa provisionar a distro `docker-desktop`
-no primeiro boot bem-sucedido. Isso demora **vários minutos** e pode
-exigir `wsl --update`. Não conclua que travou cedo demais.
-
-### Sequência depois que o Docker subir
-
-```bash
-docker compose -f infra/docker/docker-compose.yml up -d
-```
-
-Sobem 5 containers:
-
-| Container        | Imagem               | Porta     | Para quê                        |
-| ---------------- | -------------------- | --------- | ------------------------------- |
-| `atlas-postgres` | `postgres:16-alpine` | **5433**  | Banco **principal** do sistema  |
-| `atlas-redis`    | `redis:7-alpine`     | 6379      | Filas, cache, rate limit        |
-| `atlas-n8n`      | `n8nio/n8n:latest`   | 5678      | Workflows de IA e sincronização |
-| `atlas-pgadmin`  | `dpage/pgadmin4`     | 5050      | Inspeção do banco               |
-| `atlas-minio`    | `minio/minio`        | 9000/9001 | S3 local (opcional)             |
+| Container        | Porta     | Estado                        |
+| ---------------- | --------- | ----------------------------- |
+| `atlas-postgres` | **5433**  | healthy — banco **principal** |
+| `atlas-redis`    | 6379      | healthy — filas e rate limit  |
+| `atlas-n8n`      | 5678      | up, `/healthz` → 200          |
+| `atlas-pgadmin`  | 5050      | up                            |
+| `atlas-minio`    | 9000/9001 | healthy                       |
 
 > A porta **5433** é deliberada: evita conflito com um Postgres já
 > instalado no Windows na 5432. Não "corrija" para 5432.
 
-Depois:
+Migrations e seed foram aplicados no banco local. O admin do seed agora
+nasce **com senha** (ver §3.1).
 
-```bash
-pnpm --filter @atlas/database migrate:deploy   # migrations no banco LOCAL
-pnpm --filter @atlas/database seed             # seed no banco LOCAL
-```
+### Armadilhas que custaram tempo aqui
 
-**Importante:** o Neon já tem schema e seed. O banco local está vazio. Ao
-subir, o `DatabaseRouter` vai preferir o local (que estará vazio) e a
-Home ficará sem dados até o seed rodar. **Rode o seed antes de testar.**
+| Sintoma                                             | Causa e solução                                                                                                                                |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker Desktop não abria                            | Sockets corrompidos em `%LOCALAPPDATA%`. **Renomeie a PASTA** que contém o socket e deixe o Docker recriá-la — excluir o arquivo não funciona. |
+| `atlas-pgadmin` em loop de reinício                 | O pgAdmin recusa e-mail com TLD reservado. `admin@atlas.local` era inválido; o padrão agora é `admin@atlas.dev`.                               |
+| `prisma migrate dev` falha                          | É interativo e não roda por ferramenta. Use `migrate diff` para gerar o SQL e `migrate deploy` para aplicar.                                   |
+| Migration com erro de sintaxe no primeiro caractere | `Out-File -Encoding utf8` do PowerShell escreve BOM, e o Postgres não engole. Escreva o `.sql` sem BOM.                                        |
 
-### Verificação de que o n8n está de fato ok
+### Verificação do n8n
 
-Não basta o container estar "up":
+O container estar "up" não basta:
 
 1. Abrir `http://localhost:5678` (basic auth: `admin` / `atlas_n8n_password`).
 2. Importar os workflows de `infra/n8n/workflows/`.
@@ -114,188 +75,258 @@ Não basta o container estar "up":
    `.env` divergir do configurado no n8n, a API rejeita com 401 e o
    sintoma é silencioso.
 
+**Ainda não feito:** os passos 2 e 3. O container responde, mas nenhum
+workflow foi importado.
+
 ---
 
-## 3. ANTES DO FRONT — blindagem e melhorias no back
+## 3. Blindagem pré-front — CONCLUÍDA (§3.1 a §3.6 e §3.8)
 
-Ordem pensada para que nenhum item force retrabalho no front depois.
-As três primeiras são **bloqueantes**; as demais podem correr em paralelo
-ao front.
+### 3.1 ✅ Autenticação de verdade — o `dev-login` morreu
 
-### 3.1 🔴 Remover o `dev-login` e ligar o Google OAuth — BLOQUEANTE
+`dev-login.controller.ts` foi **apagado**, junto com a referência no
+`AuthModule`. A rota devolve 404.
 
-`apps/api/src/modules/auth/dev-login.controller.ts` emite sessão de
-**SUPER_ADMIN sem senha alguma**.
+No lugar dele entrou login por credenciais com **campo único de
+identificador**: o usuário digita e-mail, CPF **ou** telefone, e a API
+descobre qual é (`resolveLoginIdentifier` em `@atlas/shared`). Pedir que
+ele escolha a aba certa é pedir que lembre com o que se cadastrou.
 
-Existem três travas independentes (o controller nem é registrado fora de
-`NODE_ENV=development`, valida o ambiente em runtime e loga um WARN alto
-no boot). Ainda assim: **é uma porta dos fundos, e portas dos fundos
-vazam.** Enquanto ela existir, ninguém pode publicar nada.
+| Rota                  | O que faz                                              |
+| --------------------- | ------------------------------------------------------ |
+| `POST /auth/register` | cadastro; e-mail obrigatório, CPF e telefone opcionais |
+| `POST /auth/login`    | `{ identifier, password }` — aceita os três tipos      |
+| `POST /auth/password` | define a primeira senha ou troca a atual               |
+| `GET /auth/providers` | anuncia `{ google, credentials, identifiers }`         |
 
-O que fazer:
+Decisões que importam:
 
-1. Criar credenciais em `console.cloud.google.com/apis/credentials`.
-2. Preencher `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` no `.env`.
-3. Testar o fluxo real (`GET /api/auth/google`).
-4. **Apagar o arquivo e a referência no `AuthModule`.**
+- **CPF e telefone são normalizados antes de gravar** (11 dígitos sem
+  pontuação; telefone em E.164). Sem isso, `529.982.247-25` e
+  `52998224725` criariam duas contas, cada uma passando na constraint de
+  unicidade. O CPF é validado pelos dígitos verificadores.
+- **Falha de login é sempre `INVALID_CREDENTIALS`**, e o bcrypt roda
+  mesmo quando o usuário não existe — distinguir "conta inexistente" de
+  "senha errada", por código ou por tempo de resposta, entregaria a
+  lista de quem tem conta no Atlas.
+- **`PASSWORD_NOT_SET`** é a única exceção: a conta entrou por Google e
+  nunca definiu senha. Sem esse código a pessoa ficaria tentando senhas
+  que não existem.
+- O admin do seed nasce com senha. Em desenvolvimento é
+  `atlas-admin-2026`; em produção defina `SEED_ADMIN_PASSWORD`.
 
-O front já está pronto para os dois cenários: `/login` consulta
-`GET /api/auth/providers` e troca o botão sozinho.
+**O Google OAuth continua pronto e desligado** — falta preencher
+`GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET`. O front lê
+`/auth/providers` e mostra o botão sozinho quando isso acontecer.
+Passo a passo em [`google-oauth-setup.md`](google-oauth-setup.md).
 
-### 3.2 🔴 Rate limit compartilhado no Redis — BLOQUEANTE para produção
+### 3.2 ✅ Rate limit no Redis, por família de rota
 
-`apps/api/src/app.module.ts:52` — `ThrottlerModule.forRoot()` **sem
-storage configurado**, ou seja, contador **em memória do processo**.
+O contador saiu da memória do processo e foi para o Redis
+(`RedisThrottlerStorage`): o limite passa a ser do sistema e sobrevive a
+restart. Quando o Redis cai, degrada para contagem em memória com um
+WARN — recusar tudo transformaria queda do Redis em queda do Atlas.
 
-Consequências reais:
+| Família | Limite    | Rotas                              |
+| ------- | --------- | ---------------------------------- |
+| `auth`  | 10 / min  | register, login, password, refresh |
+| `sync`  | 10 / min  | push, pull, trigger                |
+| `ai`    | 5 / hora  | reports/generate                   |
+| padrão  | 120 / min | todo o resto                       |
 
-- Duas instâncias da API ⇒ o limite efetivo dobra.
-- Todo restart zera os contadores ⇒ um atacante só precisa esperar um deploy.
+Ajustáveis por ambiente (`RATE_LIMIT_AUTH_MAX` etc.) — apertar um limite
+sob ataque não deveria exigir deploy.
 
-Correção: `@nest-lab/throttler-storage-redis` (ou equivalente) apontando
-para o Redis que o compose já sobe.
+> ⚠️ **Armadilha do `@nestjs/throttler`:** todo throttler declarado no
+> módulo é avaliado em TODA rota. Declarar o de IA (5/hora) e supor que
+> ele vale só para `/ai/*` faz a API inteira responder 429 depois de
+> cinco requisições. Foi exatamente o que aconteceu, e o que os testes
+> pegaram. O isolamento está em `buildThrottlers` + `@ThrottleFamily`.
+> Não declare um throttler novo sem passar por lá.
 
-**Além disso, o limite hoje é único e global** (`RATE_LIMIT_MAX=120/min`
-para tudo). Antes do front chegar, diferencie por rota — senão o front
-vai ser escrito contra um comportamento que muda depois:
+A contagem é **por usuário** quando há token válido, e por IP quando não
+há. Numa academia inteira atrás do mesmo NAT, contar por IP faria o
+primeiro usuário consumir a cota de todos.
 
-| Rota                      | Limite sugerido | Motivo                           |
-| ------------------------- | --------------- | -------------------------------- |
-| `POST /auth/*`            | 5–10 / min      | Alvo de força bruta              |
-| `POST /sync/push`, `pull` | 10 / min        | Cargas grandes, custo alto       |
-| `POST /ai/reports/*`      | 2–5 / hora      | Cada chamada custa dinheiro real |
-| Leituras em geral         | 120 / min       | Atual serve                      |
+### 3.3 ✅ Testes e2e da API — 65, contra Postgres de verdade
 
-### 3.3 🔴 Testes da API — BLOQUEANTE na prática
+`apps/api/test/`, banco `atlas_test`, aplicação real via `app.inject()`.
+Nada de mock: um teste de vazamento entre academias contra um Prisma
+falso provaria apenas que o falso foi bem escrito.
 
-Os 33 testes que passam cobrem **apenas os packages**: `rbac.test.ts`,
-`webhook-signature.test.ts`, `health.test.ts`.
+| Arquivo                  | Cobre                                                    |
+| ------------------------ | -------------------------------------------------------- |
+| `auth.e2e.test.ts`       | login pelos 3 identificadores, rotação de refresh, reuso |
+| `rbac.e2e.test.ts`       | permissão por papel e **escopo por academia**            |
+| `sync.e2e.test.ts`       | push→pull, conflito persistido, payload hostil           |
+| `contract.e2e.test.ts`   | envelope, requestId, paginação, idempotência             |
+| `rate-limit.e2e.test.ts` | limites, isolamento entre famílias, contagem por usuário |
 
-**Nenhum teste toca a API.** Zero cobertura em controllers, guards, no
-motor de sincronização e no fluxo de refresh token. Construir o front
-inteiro sobre uma API sem teste significa que toda regressão vai ser
-descoberta pela tela — o lugar mais caro e mais lento para descobrir.
+Para rodar, **o Docker precisa estar de pé** (Postgres e Redis):
 
-Mínimo antes do front:
+```bash
+pnpm --filter @atlas/api test
+```
 
-- **RBAC de verdade** (e2e): usuário comum recebe 403 nas rotas de admin;
-  admin de academia **não** enxerga aluno de outra academia. Este é o
-  teste que impede vazamento de dados entre academias.
-- **Refresh token**: rotação funciona; **reuso de token revogado derruba a
-  família inteira** (a lógica existe em `packages/auth` — falta e2e).
-- **Sync**: `push` → `pull` fecha o ciclo; conflito vira registro em
-  `SyncConflict` em vez de perder dado silenciosamente.
-- **Envelope**: toda rota devolve `{ success, data, meta }`. O front
-  inteiro depende desse formato.
+> **Uma execução por vez no `atlas_test`.** As suítes truncam tabelas no
+> `beforeEach`; duas rodadas simultâneas apagam as linhas uma da outra e
+> a falha mente — vira um `P2025` ("Record to update not found") no meio
+> de um login que acabou de achar o usuário. Para rodar em paralelo, dê
+> um banco a cada execução com `TEST_DATABASE_URL`.
 
-### 3.4 🟡 Auditoria de escopo por academia
+> O Vitest da API usa **SWC**, não esbuild. O Nest resolve dependências
+> pelos tipos do construtor, que só existem em runtime se o compilador
+> emitir `design:paramtypes` — o esbuild não emite, e o sintoma é
+> confuso: todos os serviços sobem com as dependências `undefined`.
 
-O `RbacGuard` é global e valida **papel**. O que ele **não** faz é garantir
-que todo repositório filtre por `gymId`. Hoje isso depende de cada
-service lembrar de aplicar o filtro.
+### 3.4 ✅ Escopo por academia — três vazamentos fechados
 
-Um `GYM_ADMIN` que consiga ler aluno de outra academia é o pior bug
-possível neste produto. Faça uma varredura rota a rota antes do front, e
-considere mover o filtro para o repositório base (`packages/database/src/repositories/base.repository.ts`)
-em vez de confiar em cada chamada.
+Todos reais, todos com teste que falha se voltarem:
 
-### 3.5 🟡 Idempotência além da hidratação
+1. **`POST /assessments` aceitava `userId` do corpo sem checagem
+   alguma.** Qualquer conta com `assessment:create` gravava avaliação na
+   ficha de qualquer usuário do sistema, inclusive de outra academia.
+2. **`GET /exercises/:id` não filtrava por academia.** A listagem
+   escondia os exercícios exclusivos de outra unidade; o detalhe
+   entregava, bastando ter o id.
+3. **`POST /sync/push` podia sobrescrever registro alheio.** A
+   verificação de posse olhava o `userId` do _payload_ — texto vindo do
+   cliente. Mandando o `entityId` de um registro da vítima com o próprio
+   id no payload, o update passava, sobrescrevia e reatribuía o dado.
 
-`POST /hydration/logs` aceita `clientGeneratedId` e é idempotente. As
-demais rotas de escrita **não são**.
+A checagem virou serviço (`UserScopeService`, global): toda rota que
+aceita um `userId` de fora passa por ele. Antes, dependia de cada
+service lembrar — e bastava um esquecimento.
 
-Isso importa porque o app é offline-first: a fila **vai** reenviar. Sem
-idempotência, cada retry vira uma série duplicada no treino do usuário.
+### 3.5 ✅ Idempotência em todas as escritas
 
-Aplique o mesmo padrão em `POST /workouts/sessions/:id/sets`,
-`POST /workouts/sessions` e `POST /assessments`.
+`clientGeneratedId` agora existe em `SetLog` e `Assessment` (com unique
+no schema), somando-se a `HydrationLog` e `WorkoutLog`. O app é
+offline-first e a fila **vai** reenviar; sem isso, cada retry viraria
+uma série a mais no treino do usuário.
 
-### 3.6 🟡 Paginação consistente
+### 3.6 ✅ Paginação consistente
 
-Confirme que **toda** rota de lista devolve `PaginationMeta` no envelope e
-respeita `page`/`pageSize`, com um teto de `pageSize` (sugestão: 100).
-Sem teto, um cliente pede `pageSize=100000` e derruba a API.
+`/workouts/plans`, `/workouts/sessions`, `/assessments`,
+`/users/me/weight/history`, `/hydration/history` e `/ai/reports`
+devolvem `meta.pagination` completo. `pageSize` acima de 100 é recusado
+com 422 — sem teto, um cliente pede `pageSize=100000` e derruba a API.
 
-O front vai construir listas infinitas sobre esse contrato — mudá-lo
-depois obriga a reescrever as telas.
+### 3.8 ✅ Observabilidade
 
-### 3.7 🟡 Cloudinary
+- **`requestId`**: gerado no `genReqId` do Fastify (ou reaproveitado do
+  `x-request-id` de quem chamou), devolvido no header **e** no envelope,
+  e presente na linha de log. É o que liga o print do usuário à query.
+- **Latência por rota**: `HttpMetricsInterceptor` emite
+  `event: 'http.request'` com a rota **normalizada** (`/api/users/:id`,
+  não `/api/users/clx123`) — agrupar por URL crua produziria uma série
+  por usuário, que não responde nada. Acima de 1 s vira WARN.
+- **Alerta de failover**: virar para `CLOUD` agora é `logger.error` com
+  `event: 'database.failover.cloud'` (código estável, alertável) **e**
+  registro em `AuditLog`. O log some com a rotação; a auditoria responde
+  "quando o banco principal caiu semana passada?" meses depois.
 
-`CLOUDINARY_*` está vazio; o `MediaService` loga
-`"Cloudinary não configurado"` no boot e as rotas de upload não
-funcionam. Bloqueia: foto de perfil, mídia de exercício e fotos de
-avaliação.
+---
+
+## 3B. O que continua em aberto
+
+Nada aqui bloqueia o front.
+
+### 🟡 Cloudinary
+
+`CLOUDINARY_*` está vazio; o `MediaService` loga "Cloudinary não
+configurado" no boot e as rotas de upload não funcionam. Bloqueia foto
+de perfil, mídia de exercício e fotos de avaliação. **Precisa das suas
+credenciais.**
 
 A rota `GET /media/upload-signature` já implementa **upload assinado** —
 o arquivo vai do cliente direto ao Cloudinary, sem passar pela API. Não
 troque isso por upload via API.
 
-### 3.8 🟢 Observabilidade
+### 🟢 Módulos de administração
 
-O logger (pino) já redige `authorization` e `cookie`. Falta:
-
-- `requestId` propagado em **todas** as respostas (o envelope já tem o
-  campo — confirme que sempre é preenchido).
-- Métricas de latência por rota.
-- Alerta quando `activeDatabase` virar `CLOUD` — hoje o usuário vê o
-  banner, mas **ninguém é notificado**. É o sinal de que o banco
-  principal caiu.
-
-### 3.9 🟢 Módulos com regra de negócio ainda em aberto
-
-Apenas dois TODOs reais no código, ambos deliberados:
-
-| Local                      | O que falta                                |
-| -------------------------- | ------------------------------------------ |
-| `exercises.service.ts:127` | CRUD de exercícios pelo super-admin        |
-| `workouts.service.ts:327`  | Criação/atribuição de planos por professor |
+| Local                  | O que falta                                |
+| ---------------------- | ------------------------------------------ |
+| `exercises.service.ts` | CRUD de exercícios pelo super-admin        |
+| `workouts.service.ts`  | Criação/atribuição de planos por professor |
 
 Ambos são de **administração**, não do fluxo do aluno. O front do aluno
 pode ser construído sem eles; o painel admin, não.
+
+### 🟢 Workflows do n8n não importados
+
+Ver o fim da §2.
+
+---
+
+## 3C. Achados da varredura final
+
+Coisas que não estavam na lista do handoff e apareceram ao revisar o
+conjunto. Todas corrigidas.
+
+| Achado                                              | Por que importava                                                                                                                                                                                                     |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`apps/admin` sem scaffold**                       | Sem `tsconfig.json`, o `tsc --noEmit` imprimia a ajuda do compilador e saía com código 1 — `pnpm -r run typecheck` falhava sempre na raiz. Agora tem scaffold Next 15 completo, na porta **3002**.                    |
+| **ESLint da raiz não resolvia `@atlas/config`**     | O `eslint.config.mjs` importava um package que o pnpm não linkava, porque não estava declarado nas devDependencies da raiz. **Nenhum lint do monorepo rodava** — falhava antes de chegar a qualquer regra.            |
+| **Presets `nest.mjs` e `next.mjs` nunca aplicados** | Existiam em `packages/config/eslint/` sem nenhum app referenciá-los. Tudo caía no preset base.                                                                                                                        |
+| **`consistent-type-imports` ligada na API**         | Sério: o `--fix` converteria os imports das classes injetadas em `import type`, **apagando o import na compilação** e quebrando a injeção de dependência em runtime. Desligada no preset `nest`, com a razão escrita. |
+| **Limites de rate limit liam `process.env` cru**    | Contornavam o schema Zod, que é justamente onde o projeto valida ambiente no boot. Um valor inválido viraria um limite silenciosamente errado em produção. Agora passam por `envSchema` e `EnvConfig`.                |
+| **`emailLoginSchema` órfão**                        | Substituído por `credentialsLoginSchema` e sem nenhum consumidor. Removido.                                                                                                                                           |
+| **`.env.example` desatualizado**                    | Faltavam `SEED_ADMIN_PASSWORD` e os limites por família.                                                                                                                                                              |
+| **Docs com contrato antigo**                        | `api.md`, `auth-security.md`, `data-model.md`, `task-list-frontend.md`, `roadmap.md` e o README descreviam o mundo pré-mudança. O front seria construído contra a documentação errada.                                |
+| **Suíte frágil a rodadas concorrentes**             | Duas execuções no mesmo `atlas_test` truncam os dados uma da outra e produzem um `P2025` enganoso. Documentado em `test/env.ts`, com saída por `TEST_DATABASE_URL`. É do arranjo de teste, não do produto.            |
 
 ---
 
 ## 4. Ordem sugerida
 
-```
-1. Docker sobe (§2)  ──►  migrations + seed local  ──►  verificar n8n
-2. §3.1  Google OAuth + apagar dev-login
-3. §3.2  Rate limit no Redis + limites por rota
-4. §3.3  Testes e2e de RBAC, refresh e sync
-5. §3.4  Varredura de escopo por academia
-6. §3.5–3.6  Idempotência e paginação
-   └── a partir daqui o contrato está estável: front pode começar
-7. §3.7–3.9  Cloudinary, observabilidade, CRUD admin (em paralelo ao front)
-```
+Os passos 1 a 6 do plano anterior estão **feitos**. O contrato da API
+está congelado: `{ success, data, meta }` em toda rota, paginação com
+teto, idempotência por `clientGeneratedId`, e testes que quebram se
+qualquer um dos três mudar.
 
-O corte no passo 6 é o que importa: **antes dele, o contrato da API ainda
-pode mudar.** Começar o front antes disso gera retrabalho garantido.
+**O front pode começar.**
+
+Em paralelo, quando fizer sentido:
+
+```
+Cloudinary (precisa das suas credenciais)
+Google OAuth (precisa das suas credenciais)
+Workflows do n8n
+CRUD de administração + apps/admin
+```
 
 ---
 
-## 5. Armadilhas que já custaram tempo nesta sessão
+## 5. Armadilhas que já custaram tempo
 
 Registradas para não se repetirem.
 
 | Armadilha                                       | Detalhe                                                                                                                                                                                                                                                                                                |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **`tsBuildInfoFile` em tsconfig compartilhado** | Resolve relativo ao **arquivo de config**, não ao projeto. API e todos os packages gravavam no mesmo cache; cada build achava que já emitira tudo → `MODULE_NOT_FOUND` só em runtime. Por isso `incremental: false` em `packages/config/tsconfig/base.json` — **não religue sem ler o comentário lá.** |
-| **Packages precisam de build**                  | O Nest roda em CommonJS e faz `require`. `main` aponta para `dist/`, não para `src/*.ts`. Rode `turbo run build --filter='./packages/*'` **antes** de subir a API.                                                                                                                                     |
+| **Packages precisam de build**                  | O Nest roda em CommonJS e faz `require`. `main` aponta para `dist/`, não para `src/*.ts`. Rode `pnpm -r --filter './packages/*' run build` **antes** de subir a API.                                                                                                                                   |
+| **`turbo` não acha o pnpm**                     | Com o pnpm vindo do corepack, `turbo run` falha com "Unable to find package manager binary". Use `pnpm -r --filter ... run <script>` — o pnpm resolve a ordem topológica sozinho.                                                                                                                      |
 | **Aspa sobrando na URL do Neon**                | O `.env` tinha `"'postgresql://...`. Falha silenciosa e confusa. Se o Neon "não conecta sem motivo", olhe o começo da string.                                                                                                                                                                          |
 | **`pkill` não mata processo Windows**           | Use `Get-NetTCPConnection -LocalPort <p>` + `Stop-Process`. Senão você reinicia a API achando que reiniciou e continua testando a instância antiga.                                                                                                                                                    |
 | **Socket corrompido do Docker**                 | Não tente excluir o arquivo — renomeie a **pasta**.                                                                                                                                                                                                                                                    |
+| **`instanceof ZodError` mente no monorepo**     | O erro pode vir de outra instância do pacote `zod` (build CJS vs ESM). O `instanceof` devolve `false` e um 422 com a lista de campos vira 500 "erro interno". Use `isZodError` (`common/errors/is-zod-error.ts`), que checa a estrutura.                                                               |
+| **`keyPrefix` do ioredis e `KEYS`/`DEL`**       | O prefixo é aplicado de formas diferentes conforme o comando; as chaves voltam prefixadas e o `DEL` prefixa de novo. Resultado: apaga nada, em silêncio. Para varrer por padrão, use uma conexão sem `keyPrefix` e monte os nomes à mão.                                                               |
 
 ---
 
 ## 6. Configuração do ambiente atual
 
-- **Front na porta 3001**, não 3000. A 3000 está ocupada pelo dev server
-  do projeto `C:\dev\landing-page` (rodando desde 23/07). `CORS_ORIGINS` e
-  `NEXT_PUBLIC_APP_URL` já refletem a 3001. Se liberar a 3000, reverta os dois.
+- **Portas dos apps**: web na 3000 por padrão, mas a 3000 costuma estar
+  ocupada pelo dev server de `C:\dev\landing-page` — nesse caso suba com
+  `--port 3001`. `CORS_ORIGINS` aceita as duas. O **painel admin é a
+  3002**, escolhida para não colidir com nenhuma das duas.
 - **Segredos JWT no `.env` são de desenvolvimento** e estão marcados como
   tal. Gere novos para produção.
 - **`.env` não está versionado** (só `.env.example`). O `.env` atual contém
   a credencial real do Neon — não commite.
+- **Banco de testes separado**: `atlas_test`, no mesmo Postgres. As suítes
+  truncam tabelas; apontar para `atlas` apagaria o seu trabalho.
 - **App Android**: `apk/atlas-app`, **repositório git próprio**, ignorado
   pelo git do principal. Contratos entram por `npm run sync:contracts`
   (ver `docs/adr/007-app-repositorio-separado.md`).
@@ -306,8 +337,8 @@ Registradas para não se repetirem.
 
 ```bash
 pnpm install
-npx turbo run build --filter='./packages/*'     # obrigatório antes da API
-docker compose -f infra/docker/docker-compose.yml up -d
+pnpm -r --filter './packages/*' run build     # obrigatório antes da API
+docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env up -d
 pnpm --filter @atlas/database migrate:deploy
 pnpm --filter @atlas/database seed
 ```
@@ -324,6 +355,9 @@ Web (de outro):
 pnpm --filter @atlas/web dev -- --port 3001
 ```
 
+Entre com **`admin@atlas.local` / `atlas-admin-2026`** (senha do seed em
+desenvolvimento).
+
 Conferir em `http://localhost:3001/status` — é a página que mostra a
 verdade sobre as três dependências, e funciona **sem login** justamente
 para quando nada mais funciona.
@@ -334,6 +368,9 @@ para quando nada mais funciona.
 
 1. `docs/architecture-overview.md` — visão geral e diagramas C4
 2. `docs/adr/` — 7 decisões com o porquê de cada uma
-3. `docs/offline-sync.md` — o protocolo, se for mexer em sincronização
-4. `docs/auth-security.md` — antes de tocar em qualquer coisa de auth
-5. `docs/task-list-frontend.md` — backlog de front já detalhado
+3. `docs/api.md` — o contrato que o front vai consumir
+4. `docs/offline-sync.md` — o protocolo, se for mexer em sincronização
+5. `docs/auth-security.md` — antes de tocar em qualquer coisa de auth
+6. `docs/brief-front-end.md` — **ponto de partida para construir a interface**
+7. `docs/task-list-frontend.md` — backlog de front já detalhado
+8. `docs/google-oauth-setup.md` — quando for ligar o login com Google

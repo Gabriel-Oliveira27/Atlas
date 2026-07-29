@@ -12,7 +12,15 @@
  */
 
 import { PrismaClient, type RoleName } from '@prisma/client';
-import { ROLE_PERMISSIONS, ALL_PERMISSIONS, ROLES } from '@atlas/shared';
+import { formatActivationCode, generateActivationCode } from '@atlas/auth';
+import {
+  ROLE_PERMISSIONS,
+  ALL_PERMISSIONS,
+  ROLES,
+  formatCpf,
+  isValidCpf,
+  normalizeCpf,
+} from '@atlas/shared';
 
 const prisma = new PrismaClient();
 
@@ -557,26 +565,77 @@ async function seedExercises() {
   console.info(`  ${EXERCISES.length} exercícios garantidos.`);
 }
 
+/**
+ * Administrador geral.
+ *
+ * A conta nasce **sem senha**, com um código de ativação. Quem abrir o
+ * Atlas pela primeira vez informa o CPF, recebe o aviso de primeiro
+ * acesso e cria a própria senha — ninguém precisa saber, digitar ou
+ * versionar uma senha padrão.
+ *
+ * O código aparece só aqui, no terminal. Rodar o seed de novo gera um
+ * novo código, desde que a conta ainda não tenha senha; se já tiver, o
+ * seed não mexe (não faria sentido derrubar o acesso de quem já entrou).
+ */
 async function seedAdminUser() {
   console.info('→ Administrador geral...');
 
   const email = process.env.SEED_ADMIN_EMAIL ?? 'admin@atlas.local';
+  const cpf = normalizeCpf(process.env.SEED_ADMIN_CPF ?? '02515718310');
   const role = await prisma.role.findUniqueOrThrow({ where: { name: 'SUPER_ADMIN' } });
+
+  if (!cpf || !isValidCpf(cpf)) {
+    throw new Error(`SEED_ADMIN_CPF inválido: ${process.env.SEED_ADMIN_CPF ?? '(padrão)'}`);
+  }
+
+  const existing = await prisma.user.findFirst({
+    where: { OR: [{ email }, { cpf }] },
+    select: { id: true, passwordHash: true, email: true },
+  });
+
+  if (existing?.passwordHash) {
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: { roleId: role.id, isActive: true, cpf },
+    });
+
+    console.info(`  ${existing.email} · CPF ${formatCpf(cpf)}`);
+    console.info('  já tem senha definida — o seed não a altera.');
+    return;
+  }
+
+  const activation = generateActivationCode();
 
   const admin = await prisma.user.upsert({
     where: { email },
-    update: { roleId: role.id, isActive: true },
+    update: {
+      roleId: role.id,
+      isActive: true,
+      cpf,
+      activationCodeHash: activation.hash,
+      activationExpiresAt: activation.expiresAt,
+    },
     create: {
       email,
+      cpf,
       name: 'Administrador Atlas',
       roleId: role.id,
-      // Sem senha: o acesso é por Google OAuth. O login por e-mail
-      // do roadmap definirá o hash quando for habilitado.
+      activationCodeHash: activation.hash,
+      activationExpiresAt: activation.expiresAt,
       originNode: SEED_NODE,
     },
   });
 
-  console.info(`  ${admin.email} (entre com Google OAuth usando este e-mail).`);
+  const validade = activation.expiresAt.toLocaleDateString('pt-BR');
+
+  console.info(`  ${admin.email}`);
+  console.info('');
+  console.info('  ┌──────────────────────────────────────────────┐');
+  console.info(`  │  Entre com o CPF   ${formatCpf(cpf)}             │`);
+  console.info(`  │  Código de ativação   ${formatActivationCode(activation.code)}             │`);
+  console.info('  └──────────────────────────────────────────────┘');
+  console.info('');
+  console.info(`  O código vale até ${validade} e some assim que a senha for criada.`);
 }
 
 async function seedSystemDefaults() {

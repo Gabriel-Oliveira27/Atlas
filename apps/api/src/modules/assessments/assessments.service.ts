@@ -11,12 +11,17 @@ import {
   AppError,
   CHANGE_OPERATION,
   DATABASE_NODE,
+  buildPaginationMeta,
   calculateBmi,
   calculateBodyFatNavy,
   calculateLeanMass,
   classifyBmi,
+  normalizePagination,
+  type AuthenticatedUser,
+  type PaginatedResult,
 } from '@atlas/shared';
-import type { CreateAssessmentInput } from '@atlas/validation';
+import type { CreateAssessmentInput, ListAssessmentsQuery } from '@atlas/validation';
+import { UserScopeService } from '../../common/scope/user-scope.service.js';
 import { EnvConfig } from '../../config/env.config.js';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 
@@ -25,11 +30,38 @@ export class AssessmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: EnvConfig,
+    private readonly scope: UserScopeService,
   ) {}
 
-  async create(userId: string, input: CreateAssessmentInput, assessedById?: string) {
+  /**
+   * Registra uma avaliação física.
+   *
+   * `input.userId` permite ao professor avaliar um aluno — e por isso
+   * passa pelo `UserScopeService`. Antes, o valor era aceito direto do
+   * corpo da requisição: qualquer conta com `assessment:create` podia
+   * gravar uma avaliação na ficha de QUALQUER usuário do sistema,
+   * inclusive de outra academia.
+   */
+  async create(requester: AuthenticatedUser, input: CreateAssessmentInput) {
     const db = this.prisma.db;
-    const targetUserId = input.userId ?? userId;
+    const targetUserId = await this.scope.resolveTargetUserId(requester, input.userId);
+    const assessedById = targetUserId === requester.id ? undefined : requester.id;
+
+    if (input.clientGeneratedId) {
+      const existing = await db.assessment.findUnique({
+        where: {
+          userId_clientGeneratedId: {
+            userId: targetUserId,
+            clientGeneratedId: input.clientGeneratedId,
+          },
+        },
+        include: { measurements: true, photos: true },
+      });
+
+      // Reenvio da fila offline: devolve o mesmo registro em vez de
+      // criar uma segunda avaliação com a mesma data.
+      if (existing) return { ...existing, bmiCategory: classifyBmi(existing.bmi) };
+    }
 
     const bmi = calculateBmi(input.weightKg, input.heightCm);
 
@@ -56,6 +88,7 @@ export class AssessmentsService {
             ? { restingHeartRate: input.restingHeartRate }
             : {}),
           ...(input.notes ? { notes: input.notes } : {}),
+          ...(input.clientGeneratedId ? { clientGeneratedId: input.clientGeneratedId } : {}),
           originNode: this.config.nodeId,
           measurements: {
             create: input.measurements.map((measurement) => ({
@@ -92,32 +125,76 @@ export class AssessmentsService {
     });
   }
 
-  async list(userId: string, limit = 20) {
-    return this.prisma.db.assessment.findMany({
-      where: { userId, deletedAt: null },
-      orderBy: { assessedAt: 'desc' },
-      take: limit,
-      include: { measurements: true, photos: true },
-    });
+  /**
+   * Histórico de avaliações, paginado.
+   *
+   * `query.userId` permite ao professor ver o histórico de um aluno;
+   * o escopo é validado antes de qualquer consulta.
+   */
+  async list(
+    requester: AuthenticatedUser,
+    query: ListAssessmentsQuery,
+  ): Promise<PaginatedResult<unknown>> {
+    const userId = await this.scope.resolveTargetUserId(requester, query.userId);
+    const { page, pageSize, skip, take } = normalizePagination(query);
+    const db = this.prisma.db;
+
+    const where = {
+      userId,
+      deletedAt: null,
+      ...(query.from || query.to
+        ? {
+            assessedAt: {
+              ...(query.from ? { gte: new Date(query.from) } : {}),
+              ...(query.to ? { lte: new Date(query.to) } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      db.assessment.findMany({
+        where,
+        orderBy: { assessedAt: 'desc' },
+        skip,
+        take,
+        include: { measurements: true, photos: true },
+      }),
+      db.assessment.count({ where }),
+    ]);
+
+    return {
+      items: items.map((item) => ({ ...item, bmiCategory: classifyBmi(item.bmi) })),
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
   }
 
-  async findById(userId: string, id: string) {
+  async findById(requester: AuthenticatedUser, id: string) {
     const assessment = await this.prisma.db.assessment.findFirst({
-      where: { id, userId, deletedAt: null },
+      where: { id, deletedAt: null },
       include: { measurements: true, photos: true },
     });
 
     if (!assessment) throw AppError.notFound('Avaliação', id);
 
+    // O filtro de escopo é pelo DONO da avaliação, não pelo id do
+    // solicitante: filtrar por `userId` na query devolveria 404 para o
+    // professor legítimo e esconderia o erro de permissão real.
+    await this.scope.assertCanAccess(requester, assessment.userId);
+
     return { ...assessment, bmiCategory: classifyBmi(assessment.bmi) };
   }
 
   /** Compara duas avaliações — alimenta a tela de evolução. */
-  async compare(userId: string, fromId: string, toId: string) {
+  async compare(requester: AuthenticatedUser, fromId: string, toId: string) {
     const [from, to] = await Promise.all([
-      this.findById(userId, fromId),
-      this.findById(userId, toId),
+      this.findById(requester, fromId),
+      this.findById(requester, toId),
     ]);
+
+    if (from.userId !== to.userId) {
+      throw AppError.validation('As duas avaliações precisam ser do mesmo usuário');
+    }
 
     const measurementDelta = to.measurements.map((current) => {
       const previous = from.measurements.find((m) => m.site === current.site);

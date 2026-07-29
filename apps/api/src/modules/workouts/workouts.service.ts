@@ -13,14 +13,21 @@ import {
   CHANGE_OPERATION,
   DATABASE_NODE,
   ERROR_CODES,
+  buildPaginationMeta,
   calculateVolumeLoad,
+  normalizePagination,
   toDayKey,
+  type AuthenticatedUser,
+  type PaginatedResult,
 } from '@atlas/shared';
 import type {
   FinishWorkoutSessionInput,
+  ListWorkoutLogsQuery,
   LogSetInput,
+  PaginationInput,
   StartWorkoutSessionInput,
 } from '@atlas/validation';
+import { UserScopeService } from '../../common/scope/user-scope.service.js';
 import { EnvConfig } from '../../config/env.config.js';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 
@@ -29,6 +36,7 @@ export class WorkoutsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: EnvConfig,
+    private readonly scope: UserScopeService,
   ) {}
 
   /** Plano ativo do usuário, com dias e exercícios prescritos. */
@@ -63,12 +71,23 @@ export class WorkoutsService {
     });
   }
 
-  async listPlans(userId: string) {
-    return this.prisma.db.workoutPlan.findMany({
-      where: { userId, deletedAt: null },
-      orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
-      include: { days: { where: { deletedAt: null }, select: { id: true, label: true } } },
-    });
+  async listPlans(userId: string, query: PaginationInput): Promise<PaginatedResult<unknown>> {
+    const { page, pageSize, skip, take } = normalizePagination(query);
+    const db = this.prisma.db;
+    const where = { userId, deletedAt: null };
+
+    const [items, total] = await Promise.all([
+      db.workoutPlan.findMany({
+        where,
+        orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take,
+        include: { days: { where: { deletedAt: null }, select: { id: true, label: true } } },
+      }),
+      db.workoutPlan.count({ where }),
+    ]);
+
+    return { items, meta: buildPaginationMeta(page, pageSize, total) };
   }
 
   /**
@@ -158,6 +177,20 @@ export class WorkoutsService {
         });
       }
 
+      if (input.clientGeneratedId) {
+        const existing = await tx.setLog.findUnique({
+          where: {
+            workoutLogId_clientGeneratedId: {
+              workoutLogId,
+              clientGeneratedId: input.clientGeneratedId,
+            },
+          },
+        });
+
+        // Reenvio da fila offline: a série já está registrada.
+        if (existing) return existing;
+      }
+
       const set = await tx.setLog.create({
         data: {
           workoutLogId,
@@ -175,6 +208,7 @@ export class WorkoutsService {
           isWarmup: input.isWarmup,
           completedAt: input.completedAt,
           ...(input.notes ? { notes: input.notes } : {}),
+          ...(input.clientGeneratedId ? { clientGeneratedId: input.clientGeneratedId } : {}),
           originNode: this.config.nodeId,
         },
       });
@@ -260,17 +294,50 @@ export class WorkoutsService {
     });
   }
 
-  /** Histórico de sessões. */
-  async listSessions(userId: string, limit = 30) {
-    return this.prisma.db.workoutLog.findMany({
-      where: { userId, deletedAt: null },
-      orderBy: { startedAt: 'desc' },
-      take: limit,
-      include: {
-        workoutDay: { select: { label: true, name: true } },
-        _count: { select: { sets: true } },
-      },
-    });
+  /**
+   * Histórico de sessões, paginado.
+   *
+   * `query.userId` deixa o professor abrir o histórico de um aluno —
+   * validado pelo escopo antes de qualquer consulta.
+   */
+  async listSessions(
+    requester: AuthenticatedUser,
+    query: ListWorkoutLogsQuery,
+  ): Promise<PaginatedResult<unknown>> {
+    const userId = await this.scope.resolveTargetUserId(requester, query.userId);
+    const { page, pageSize, skip, take } = normalizePagination(query);
+    const db = this.prisma.db;
+
+    const where = {
+      userId,
+      deletedAt: null,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.workoutPlanId ? { workoutPlanId: query.workoutPlanId } : {}),
+      ...(query.from || query.to
+        ? {
+            startedAt: {
+              ...(query.from ? { gte: new Date(query.from) } : {}),
+              ...(query.to ? { lte: new Date(query.to) } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      db.workoutLog.findMany({
+        where,
+        orderBy: { startedAt: 'desc' },
+        skip,
+        take,
+        include: {
+          workoutDay: { select: { label: true, name: true } },
+          _count: { select: { sets: true } },
+        },
+      }),
+      db.workoutLog.count({ where }),
+    ]);
+
+    return { items, meta: buildPaginationMeta(page, pageSize, total) };
   }
 
   /**

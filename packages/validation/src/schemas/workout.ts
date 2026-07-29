@@ -166,6 +166,12 @@ export const logSetSchema = z.object({
   isWarmup: z.boolean().default(false),
   completedAt: z.coerce.date().default(() => new Date()),
   notes: z.string().max(300).optional(),
+  /**
+   * ID gerado no dispositivo. Sem ele, cada retry da fila offline
+   * vira uma série a mais no treino — o erro fica no histórico do
+   * usuário e contamina o cálculo de volume.
+   */
+  clientGeneratedId: z.string().max(64).optional(),
 });
 export type LogSetInput = z.infer<typeof logSetSchema>;
 

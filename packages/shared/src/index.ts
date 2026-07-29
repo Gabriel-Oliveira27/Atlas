@@ -23,4 +23,5 @@ export * from './types/pagination.js';
 
 export * from './utils/date.js';
 export * from './utils/health.js';
+export * from './utils/identity.js';
 export * from './utils/result.js';

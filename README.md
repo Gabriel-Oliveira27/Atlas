@@ -54,16 +54,38 @@ Documentação interativa da API: http://localhost:3333/docs
 | PostgreSQL | `localhost:5433`          | **5433** para não conflitar com um PostgreSQL já instalado no Windows |
 | Redis      | `localhost:6379`          | Filas e rate limit                                                    |
 | n8n        | http://localhost:5678     | `admin` / `atlas_n8n_password`                                        |
-| pgAdmin    | http://localhost:5050     | `admin@atlas.local`                                                   |
+| pgAdmin    | http://localhost:5050     | `admin@atlas.dev` — **não** use `.local`, o pgAdmin recusa o domínio  |
 | MinIO      | http://localhost:9001     | Console S3 local                                                      |
+
+## Entrar no sistema
+
+O seed cria um administrador geral **sem senha** e imprime um código de
+ativação no terminal:
+
+```
+┌──────────────────────────────────────────────┐
+│  Entre com o CPF   025.157.183-10            │
+│  Código de ativação   ABCD-2345              │
+└──────────────────────────────────────────────┘
+```
+
+Abra `http://localhost:3000/login`, informe o CPF, e a tela pede o
+código e a senha que você quiser. Nenhuma senha padrão é versionada.
+
+O login aceita **e-mail, CPF ou telefone** no mesmo campo — a API
+descobre qual é. Para trocar o CPF do admin, use `SEED_ADMIN_CPF`.
+
+> Rodar o seed de novo gera um código novo, desde que a conta ainda não
+> tenha senha. Se já tiver, o seed não mexe — não faria sentido derrubar
+> o acesso de quem já entrou.
 
 ## Estrutura
 
 ```
 apps/
-  api/        NestJS + Fastify        ← entregue e funcional
-  web/        Next.js PWA (atlas)     ← scaffold
-  admin/      Next.js (admin)         ← scaffold
+  api/        NestJS + Fastify        ← entregue, testado e funcional
+  web/        Next.js PWA — porta 3000 (ou 3001 se a 3000 estiver ocupada)
+  admin/      Next.js admin — porta 3002, scaffold
 packages/
   database/     Prisma, cliente duplo local/Neon, seed
   auth/         JWT, rotação de refresh, RBAC, assinatura de webhook
@@ -71,7 +93,8 @@ packages/
   validation/   schemas Zod usados pela API e pelos formulários
   ai/           camada de IA agnóstica (Claude, OpenAI, Gemini)
   config/       presets de TS/ESLint/Prettier
-  ui/           componentes compartilhados (a construir)
+                (`ui/` ainda não existe — quando web e admin repetirem o
+                 mesmo componente ou o mesmo cliente HTTP, é aqui que entra)
 infra/
   docker/       docker-compose e init do banco
   n8n/          workflows
@@ -144,15 +167,15 @@ dados para funcionar por completo:
 | Variável                      | Onde obter                                                                | Sem ela                                    |
 | ----------------------------- | ------------------------------------------------------------------------- | ------------------------------------------ |
 | `DATABASE_URL_CLOUD`          | [Neon](https://console.neon.tech) → Connection string (Pooled)            | Sem failover nem sincronização com a nuvem |
-| `GOOGLE_CLIENT_ID` / `SECRET` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | Login indisponível                         |
+| `GOOGLE_CLIENT_ID` / `SECRET` | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | Só o login por senha fica disponível       |
 | `CLOUDINARY_*`                | [Cloudinary](https://console.cloudinary.com)                              | Uploads de mídia indisponíveis             |
 | `ANTHROPIC_API_KEY`           | [Anthropic Console](https://console.anthropic.com)                        | Relatórios de IA indisponíveis             |
 
-**Redirect URIs a autorizar no Google:**
+Nenhuma delas impede o sistema de subir: o login por credenciais
+funciona sem o Google, e a API avisa no boot o que está faltando.
 
-```
-http://localhost:3333/api/auth/google/callback
-```
+Passo a passo do Google, incluindo os erros mais comuns:
+[`docs/google-oauth-setup.md`](docs/google-oauth-setup.md).
 
 ## Licença
 

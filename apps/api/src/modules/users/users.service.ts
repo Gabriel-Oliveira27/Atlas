@@ -20,6 +20,7 @@ import { canAccessUserData } from '@atlas/auth';
 import type {
   ListUsersQuery,
   LogWeightInput,
+  PaginationInput,
   UpdatePreferencesInput,
   UpdateProfileInput,
 } from '@atlas/validation';
@@ -218,14 +219,27 @@ export class UsersService {
     });
   }
 
-  /** Histórico de peso para o gráfico de evolução. */
-  async getWeightHistory(userId: string, limit = 90) {
-    return this.prisma.db.weightLog.findMany({
-      where: { userId, deletedAt: null },
-      orderBy: { measuredAt: 'desc' },
-      take: limit,
-      select: { id: true, weightKg: true, measuredAt: true, dayKey: true, note: true },
-    });
+  /** Histórico de peso para o gráfico de evolução, paginado. */
+  async getWeightHistory(
+    userId: string,
+    query: PaginationInput,
+  ): Promise<PaginatedResult<unknown>> {
+    const { page, pageSize, skip, take } = normalizePagination(query);
+    const db = this.prisma.db;
+    const where = { userId, deletedAt: null };
+
+    const [items, total] = await Promise.all([
+      db.weightLog.findMany({
+        where,
+        orderBy: { measuredAt: 'desc' },
+        skip,
+        take,
+        select: { id: true, weightKg: true, measuredAt: true, dayKey: true, note: true },
+      }),
+      db.weightLog.count({ where }),
+    ]);
+
+    return { items, meta: buildPaginationMeta(page, pageSize, total) };
   }
 
   /**

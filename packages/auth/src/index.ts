@@ -9,4 +9,5 @@
 export * from './tokens.js';
 export * from './rbac.js';
 export * from './password.js';
+export * from './activation.js';
 export * from './webhook-signature.js';

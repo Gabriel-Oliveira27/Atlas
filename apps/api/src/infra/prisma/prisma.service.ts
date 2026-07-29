@@ -19,6 +19,15 @@ import {
 import { DATABASE_NODE, type DatabaseNode } from '@atlas/shared';
 import { EnvConfig } from '../../config/env.config.js';
 
+/**
+ * Códigos de evento estáveis para regras de alerta.
+ *
+ * Alertar por texto de mensagem quebra na primeira revisão de redação.
+ * Estes dois códigos são contrato com o pipeline de observabilidade.
+ */
+export const DB_FAILOVER_EVENT = 'database.failover.cloud';
+export const DB_RECOVERY_EVENT = 'database.failover.recovered';
+
 @Injectable()
 export class PrismaService implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(PrismaService.name);
@@ -114,14 +123,26 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
 
   private async handleNodeChange(event: NodeChangeEvent): Promise<void> {
     if (event.to === DATABASE_NODE.CLOUD) {
-      this.logger.warn(
-        'Banco local indisponível — assumindo o Neon. As alterações serão reconciliadas quando o local voltar.',
+      // ERROR, não WARN: o banco principal caiu. O usuário já vê o
+      // banner na UI, mas o banner não acorda ninguém — este log é o
+      // gancho de alerta. `event` é o campo estável para a regra do
+      // pipeline de observabilidade; a mensagem pode mudar, ele não.
+      this.logger.error(
+        { event: DB_FAILOVER_EVENT, from: event.from, to: event.to },
+        'FAILOVER: banco local indisponível — assumindo o Neon. As alterações serão reconciliadas quando o local voltar.',
       );
+
+      await this.recordFailoverAudit(DB_FAILOVER_EVENT, event);
       return;
     }
 
     if (event.recovered) {
-      this.logger.log('Banco local restabelecido — iniciando reconciliação.');
+      this.logger.log(
+        { event: DB_RECOVERY_EVENT, from: event.from, to: event.to },
+        'Banco local restabelecido — iniciando reconciliação.',
+      );
+
+      await this.recordFailoverAudit(DB_RECOVERY_EVENT, event);
 
       for (const listener of this.recoveryListeners) {
         try {
@@ -136,5 +157,27 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
     }
 
     this.logger.log(`Banco ativo: ${event.to}.`);
+  }
+
+  /**
+   * Deixa a troca de nó registrada no banco, não só no log.
+   *
+   * O log some com a rotação; a trilha de auditoria responde "quando o
+   * banco principal caiu na semana passada?" meses depois. A gravação é
+   * best-effort de propósito: se o banco que sobrou também recusar a
+   * escrita, o failover não pode falhar por causa do registro dele.
+   */
+  private async recordFailoverAudit(action: string, event: NodeChangeEvent): Promise<void> {
+    try {
+      await this.db.auditLog.create({
+        data: {
+          action,
+          entity: 'Database',
+          after: { from: event.from, to: event.to, nodeId: this.config.nodeId } as never,
+        },
+      });
+    } catch (error) {
+      this.logger.warn({ err: error }, 'Não foi possível registrar a troca de banco na auditoria.');
+    }
   }
 }
