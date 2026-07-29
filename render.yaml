@@ -29,13 +29,17 @@ services:
     region: oregon
     branch: main
 
-    # `corepack enable` antes de tudo: o repositório fixa a versão do
-    # pnpm em `packageManager`, e sem o corepack o Render usaria npm.
+    # `corepack pnpm ...`, e NÃO `corepack enable`.
+    #
+    # O `enable` instala um atalho global em /usr/bin, que no Render é
+    # somente leitura — o build morre em
+    # "EROFS: read-only file system, unlink '/usr/bin/pnpm'".
+    # Chamado direto, o corepack executa o pnpm da versão fixada em
+    # `packageManager` sem instalar nada fora do projeto.
     buildCommand: >-
-      corepack enable &&
-      pnpm install --frozen-lockfile &&
-      pnpm db:generate &&
-      pnpm --filter "@atlas/api..." build
+      corepack pnpm install --frozen-lockfile &&
+      corepack pnpm db:generate &&
+      corepack pnpm --filter "@atlas/api..." build
 
     startCommand: node apps/api/dist/main.js
 
@@ -44,6 +48,17 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+
+      # O corepack pergunta antes de baixar o pnpm na primeira execução.
+      # Sem TTY para responder, o build ficaria pendurado até o timeout.
+      - key: COREPACK_ENABLE_DOWNLOAD_PROMPT
+        value: '0'
+
+      # Node 22: o `corepack` só vem embutido a partir do 16, e o
+      # projeto exige >=20.11 (engines). Fixar evita o Render escolher
+      # uma versão antiga e falhar em sintaxe moderna.
+      - key: NODE_VERSION
+        value: '22'
 
       # Sem Postgres local aqui: o Neon é o principal desta instância.
       - key: DATABASE_PRIMARY

@@ -15,7 +15,7 @@
 
 import type { ApiResponse, ErrorCode, PaginationMeta } from '@atlas/shared';
 import { clearSession, getSession, saveSession } from './session';
-import { getBaseUrl, invalidateEndpoint, resolveBaseUrl } from './endpoint';
+import { getBaseUrl, invalidateEndpoint, isPointingAtLocalhost, resolveBaseUrl } from './endpoint';
 
 /**
  * Endereço padrão, usado antes da primeira sondagem e quando não há
@@ -155,6 +155,19 @@ async function execute<T>(path: string, options: RequestOptions, retrying = fals
     // decisão para a próxima chamada sondar de novo — sem isso, o app
     // insistiria no endereço morto até o cache expirar.
     invalidateEndpoint();
+
+    // Site publicado apontando para localhost é configuração faltando,
+    // não API fora do ar. Dizer "falha de rede" aqui manda o usuário
+    // procurar no lugar errado.
+    if (isPointingAtLocalhost()) {
+      throw new ApiError(
+        'API_NAO_CONFIGURADA',
+        'Este site está publicado, mas a API aponta para localhost. ' +
+          'Defina NEXT_PUBLIC_API_URL nas variáveis de ambiente da Vercel e refaça o deploy.',
+        0,
+      );
+    }
+
     // Falha de rede: a API está fora, não é erro de aplicação.
     throw new ApiError(
       'NETWORK_ERROR',

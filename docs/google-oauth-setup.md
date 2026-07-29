@@ -91,6 +91,47 @@ O `.env` **não é versionado** — o secret não vai para o Git. Confira que
 não há aspas nem espaços sobrando: a API valida o ambiente no boot, mas
 uma aspa perdida no meio de uma string passa e quebra depois.
 
+### Quando a API sair do localhost
+
+O mesmo cliente serve para tudo — **um só, do tipo "Aplicativo da Web"**,
+inclusive para o aplicativo Android. É a API que conversa com o Google; o
+app apenas abre o navegador e recebe o resultado pelo deep link
+`atlasapp://`. Um cliente do tipo "Android" só faria sentido se o app
+falasse com o Google diretamente, que não é o caso aqui.
+
+Some as URIs de cada ambiente onde a API rodar. Elas **convivem** — não
+substitua as de localhost, senão o desenvolvimento para de funcionar.
+
+**URIs de redirecionamento autorizados:**
+
+```
+http://localhost:3333/api/auth/google/callback
+https://SEU-SERVICO.onrender.com/api/auth/google/callback
+```
+
+**Origens JavaScript autorizadas:**
+
+```
+http://localhost:3000
+http://localhost:3001
+https://atlas-academia.vercel.app
+```
+
+E no ambiente de **cada** instância da API, o `GOOGLE_CALLBACK_URL`
+aponta para ela mesma:
+
+```env
+# no painel do Render
+GOOGLE_CALLBACK_URL=https://SEU-SERVICO.onrender.com/api/auth/google/callback
+OAUTH_SUCCESS_REDIRECT_WEB=https://atlas-academia.vercel.app/auth/callback
+```
+
+> O túnel do Cloudflare sorteia um subdomínio a cada execução, e o Google
+> **não aceita curinga** em URI de redirecionamento. Login com Google
+> pelo túnel exigiria recadastrar a URI toda vez — na prática, use o
+> Google pela API hospedada (endereço fixo) e o login por senha quando
+> estiver no túnel.
+
 ---
 
 ## 5. Reiniciar e verificar

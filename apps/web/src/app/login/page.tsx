@@ -376,6 +376,10 @@ function mensagemDeErro(err: unknown): string {
   }
 
   switch (err.code) {
+    // Configuração faltando, não credencial errada — a mensagem já vem
+    // pronta do cliente HTTP e diz o que fazer.
+    case 'API_NAO_CONFIGURADA':
+      return err.message;
     case 'INVALID_CREDENTIALS':
       return 'E-mail, CPF, telefone ou senha incorretos.';
     case 'ACTIVATION_CODE_INVALID':

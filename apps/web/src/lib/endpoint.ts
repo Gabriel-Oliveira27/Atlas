@@ -45,6 +45,27 @@ interface Decision {
   decidedAt: number;
 }
 
+/**
+ * Detecta o site publicado apontando para `localhost`.
+ *
+ * `NEXT_PUBLIC_API_URL` tem `http://localhost:3333/api` como padrão —
+ * conveniente em desenvolvimento e enganoso em produção: quando a
+ * variável não é definida na Vercel, o site sobe normalmente e cada
+ * chamada tenta a máquina de QUEM ABRIU a página. O erro que aparece é
+ * "falha de rede", que não sugere configuração faltando.
+ *
+ * Isto reconhece a situação para a mensagem dizer o que realmente houve.
+ */
+export function isPointingAtLocalhost(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  const paginaLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  if (paginaLocal) return false;
+
+  const alvo = getBaseUrl();
+  return alvo.includes('//localhost') || alvo.includes('//127.0.0.1');
+}
+
 let current: Decision | null = null;
 let inFlight: Promise<Decision> | null = null;
 
