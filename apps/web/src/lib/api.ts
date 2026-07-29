@@ -44,6 +44,35 @@ export interface Paged<T> {
   pagination?: PaginationMeta;
 }
 
+/**
+ * Rastreio de `meta.servedBy`.
+ *
+ * Toda resposta informa qual banco atendeu. Quando vira `CLOUD`, o
+ * sistema está em contingência e o AppShell exibe um aviso global —
+ * assim nenhuma tela precisa checar isso por conta própria.
+ */
+type ServedBy = 'LOCAL' | 'CLOUD' | null;
+
+let lastServedBy: ServedBy = null;
+const servedByListeners = new Set<(value: ServedBy) => void>();
+
+export function getServedBy(): ServedBy {
+  return lastServedBy;
+}
+
+export function subscribeServedBy(listener: (value: ServedBy) => void): () => void {
+  servedByListeners.add(listener);
+  return () => servedByListeners.delete(listener);
+}
+
+function trackServedBy(meta: unknown): void {
+  const servedBy = (meta as { servedBy?: ServedBy } | undefined)?.servedBy ?? null;
+  if (servedBy && servedBy !== lastServedBy) {
+    lastServedBy = servedBy;
+    for (const listener of servedByListeners) listener(servedBy);
+  }
+}
+
 /** Refresh em andamento — compartilhado por todas as chamadas. */
 let refreshInFlight: Promise<boolean> | null = null;
 
@@ -129,6 +158,8 @@ async function execute<T>(path: string, options: RequestOptions, retrying = fals
   } catch {
     throw new ApiError('INVALID_RESPONSE', 'A API devolveu uma resposta ilegível', response.status);
   }
+
+  trackServedBy(payload.meta);
 
   if (payload.success) return payload.data;
 

@@ -31,6 +31,22 @@ const config: Config = {
         warning: '#FBBF24',
         danger: '#F87171',
 
+        /**
+         * Marcas de gráfico. Tons próprios, mais fechados que o acento da
+         * interface: sobre fundo escuro, os passos claros ficam fora da
+         * faixa de luminosidade legível (OKLCH L 0.48–0.67) e dois deles
+         * lado a lado não se separam o suficiente para daltonismo. Este
+         * par foi validado (ΔE 16,1 protan · contraste ≥ 3:1). O acento
+         * claro fica reservado ao ponto/barra em destaque — realce é
+         * estado, e ali o brilho é justamente o que se quer.
+         */
+        chart: {
+          series: '#0284C7',
+          positive: '#059669',
+          highlight: '#38BDF8',
+          grid: '#233149',
+        },
+
         // Texto.
         ink: '#F1F5F9',
         'ink-muted': '#94A3B8',

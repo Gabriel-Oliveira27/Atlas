@@ -5,21 +5,65 @@
 @layer base {
   html {
     color-scheme: dark;
+    /* Rolagem com barra estável evita "pulos" de layout entre páginas. */
+    scrollbar-gutter: stable;
   }
 
   body {
     @apply bg-base text-ink antialiased;
+    /* Brilho radial sutil no topo — dá profundidade sem pesar. */
+    background-image: radial-gradient(60rem 32rem at 50% -12rem, rgba(56, 189, 248, 0.08), transparent);
+    background-attachment: fixed;
   }
 
-  /* Área de toque confortável em telas pequenas — o app é usado com o
-     celular na mão, entre séries. */
+  /* O app é usado com o celular na mão, entre séries: sem flash azul de
+     toque e com alvos de toque generosos. */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
   button,
   a {
     @apply outline-none;
+    touch-action: manipulation;
   }
 
   :focus-visible {
     @apply ring-2 ring-accent ring-offset-2 ring-offset-base;
+  }
+
+  /* Remove os spinners dos inputs numéricos — o app tem botões próprios. */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full border-2 border-solid border-base bg-elevated;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
@@ -34,5 +78,82 @@
 
   .stat {
     @apply text-3xl font-semibold tabular-nums text-ink;
+  }
+
+  /* ── Botões ─────────────────────────────────────────────── */
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-base hover:bg-accent-strong active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply btn border border-border bg-surface text-ink hover:bg-elevated;
+  }
+
+  .btn-danger {
+    @apply btn border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20;
+  }
+
+  /* ── Formulário ─────────────────────────────────────────── */
+
+  .input {
+    @apply w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-accent;
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-medium text-ink-muted;
+  }
+
+  /* ── Filtros em pílula ──────────────────────────────────── */
+
+  .chip {
+    @apply rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-ink-muted transition hover:bg-elevated;
+  }
+
+  .chip-active {
+    @apply rounded-full border border-accent bg-accent px-3 py-1.5 text-xs font-medium text-base;
+  }
+}
+
+@layer utilities {
+  /* Barra inferior do mobile respeita o recorte do aparelho. */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /**
+   * Ancora um elemento logo ACIMA da barra de abas.
+   *
+   * 56px de altura mínima + 1px de borda + o recorte do aparelho. Um
+   * valor fixo funcionaria no emulador e sobreporia a barra num celular
+   * com recorte — que é justamente onde o usuário está.
+   */
+  .bottom-tabbar {
+    bottom: calc(57px + env(safe-area-inset-bottom, 0px));
+  }
+
+  @media (min-width: 768px) {
+    .bottom-tabbar {
+      bottom: 0;
+    }
+  }
+
+  .animate-fade-up {
+    animation: fade-up 0.35s ease both;
+  }
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }

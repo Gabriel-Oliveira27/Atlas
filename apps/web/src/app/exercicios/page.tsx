@@ -5,10 +5,12 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import { AppShell } from '@/components/app-shell';
 import { QueryState } from '@/components/query-state';
+import { IconChevronRight, IconSearch } from '@/components/icons';
 
 interface Exercise {
   id: string;
@@ -60,21 +62,23 @@ export default function ExerciciosPage() {
         <h1 className="mb-6 text-2xl font-semibold tracking-tight">Exercícios</h1>
 
         <div className="mb-5 space-y-3">
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar exercício…"
-            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm placeholder:text-ink-faint focus:border-accent"
-          />
+          <div className="relative">
+            <IconSearch
+              size={16}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"
+            />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar exercício…"
+              className="input pl-9"
+            />
+          </div>
 
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setGroupId('')}
-              className={`rounded-full px-3 py-1 text-xs transition ${
-                groupId === ''
-                  ? 'bg-accent font-medium text-base'
-                  : 'border border-border bg-surface text-ink-muted hover:bg-elevated'
-              }`}
+              className={groupId === '' ? 'chip-active' : 'chip'}
             >
               Todos
             </button>
@@ -82,11 +86,7 @@ export default function ExerciciosPage() {
               <button
                 key={group.id}
                 onClick={() => setGroupId(group.id)}
-                className={`rounded-full px-3 py-1 text-xs transition ${
-                  groupId === group.id
-                    ? 'bg-accent font-medium text-base'
-                    : 'border border-border bg-surface text-ink-muted hover:bg-elevated'
-                }`}
+                className={groupId === group.id ? 'chip-active' : 'chip'}
               >
                 {group.name}
               </button>
@@ -106,9 +106,19 @@ export default function ExerciciosPage() {
                 {exercises.map((exercise) => {
                   const difficulty = DIFFICULTY[exercise.difficulty];
                   return (
-                    <li key={exercise.id} className="card">
+                    <li
+                      key={exercise.id}
+                      className="card relative transition hover:border-accent/50"
+                    >
                       <div className="flex items-start justify-between gap-3">
-                        <h2 className="text-sm font-medium leading-snug">{exercise.name}</h2>
+                        <h2 className="text-sm font-medium leading-snug">
+                          <Link
+                            href={`/exercicios/${exercise.id}`}
+                            className="after:absolute after:inset-0"
+                          >
+                            {exercise.name}
+                          </Link>
+                        </h2>
                         {difficulty && (
                           <span className={`shrink-0 text-[10px] ${difficulty.className}`}>
                             {difficulty.label}
@@ -136,19 +146,22 @@ export default function ExerciciosPage() {
                       )}
 
                       {/* Estímulos: a informação que diferencia o catálogo */}
-                      <div className="mt-3 flex gap-4 text-[10px] text-ink-faint">
-                        <span>
-                          Hipertrofia{' '}
-                          <span className="font-medium text-accent">
-                            {exercise.stimulusHypertrophy}/5
+                      <div className="mt-3 flex items-center justify-between">
+                        <div className="flex gap-4 text-[10px] text-ink-faint">
+                          <span>
+                            Hipertrofia{' '}
+                            <span className="font-medium text-accent">
+                              {exercise.stimulusHypertrophy}/5
+                            </span>
                           </span>
-                        </span>
-                        <span>
-                          Força{' '}
-                          <span className="font-medium text-accent">
-                            {exercise.stimulusStrength}/5
+                          <span>
+                            Força{' '}
+                            <span className="font-medium text-accent">
+                              {exercise.stimulusStrength}/5
+                            </span>
                           </span>
-                        </span>
+                        </div>
+                        <IconChevronRight size={14} className="text-ink-faint" />
                       </div>
                     </li>
                   );

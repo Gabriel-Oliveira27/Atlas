@@ -364,6 +364,44 @@ para quando nada mais funciona.
 
 ---
 
+---
+
+## 8. Front-end — o que existe hoje (28/07/2026)
+
+> Escrito depois da sessão de front. O §3 acima descreve a ordem
+> planejada; parte dela foi feita em paralelo, em outro worktree.
+
+**Web** (`apps/web`) — 12 rotas, `typecheck`, `lint` e `build` passando.
+Verificado no navegador contra a API real: cadastro, login, home,
+hidratação gravando, treino livre com série registrada (volume 800 kg
+conferido), finalização com avaliação, evolução, perfil. Testado em
+1280 px e em 360 px, sem estouro horizontal.
+
+**App Android** (`apk/atlas-app`) — 12 telas em `expo-router`,
+`tsc --noEmit` limpo. Espelha o web em funcionalidade, com o que é
+próprio do aparelho: tokens no Keystore (`expo-secure-store`), vibração
+ao fim do descanso, notificações locais de hidratação, deep link
+`atlasapp://auth/callback`.
+
+### Bugs pré-existentes corrigidos nesta sessão
+
+| Onde                                       | O que estava quebrado                                                                                                    |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `package.json` da raiz                     | `eslint.config.mjs` importa `@atlas/config`, que não estava nas devDependencies — **todo `lint` falhava**                |
+| `apk/atlas-app/scripts/sync-contracts.mjs` | Copiava `@atlas/shared` sem reescrever ⇒ `TS2307`; e mantinha a extensão `.js`, que o Metro não resolve ⇒ bundle falhava |
+
+Os dois eram invisíveis até alguém rodar `lint` ou empacotar o app.
+
+### O que continua pendente no front
+
+- **F1.4 / F1.5 — banco local e motor de sincronização.** As telas leem
+  direto da rede. A escrita já manda `clientGeneratedId`, então a fila
+  offline entra depois sem reescrever tela.
+- **Fase 3 — painéis de administração** (`apps/admin` segue vazio).
+- **Upload de mídia** — bloqueado pelas credenciais do Cloudinary (§3.7).
+
+---
+
 ## Leitura recomendada, nesta ordem
 
 1. `docs/architecture-overview.md` — visão geral e diagramas C4

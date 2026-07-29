@@ -6,6 +6,34 @@ pronta, sem alterações estruturais**.
 > Leia antes: [`api.md`](api.md) (contratos) e
 > [`offline-sync.md`](offline-sync.md) (protocolo offline).
 
+## Estado em 28/07/2026
+
+O que já foi construído e verificado rodando:
+
+| Item                                        | Web       | App Android            |
+| ------------------------------------------- | --------- | ---------------------- |
+| Cliente HTTP com envelope + refresh na fila | ✅        | ✅                     |
+| Login (senha, primeiro acesso, cadastro)    | ✅        | ✅                     |
+| Callback do Google (fragmento da URL)       | ✅        | ✅ (deep link)         |
+| Home agregada                               | ✅        | ✅                     |
+| Hidratação com escrita otimista             | ✅        | ✅                     |
+| Histórico de hidratação + lembretes         | ✅        | ✅ (notificação local) |
+| Treino: plano, iniciar, retomar             | ✅        | ✅                     |
+| Execução série a série + descanso           | ✅        | ✅ (com vibração)      |
+| Catálogo e detalhe de exercício             | ✅        | ✅                     |
+| Evolução (peso e volume)                    | ✅        | ✅                     |
+| Perfil e preferências                       | ✅        | ✅                     |
+| PWA instalável                              | ✅        | —                      |
+| Aviso de contingência (`servedBy=CLOUD`)    | ✅ global | ✅ global              |
+
+**Ainda pendente** (F1.4/F1.5): o banco local no cliente (IndexedDB /
+`expo-sqlite`) e o motor de sincronização. Hoje as telas leem direto da
+rede; a escrita já manda `clientGeneratedId`, então a fila offline pode
+ser acrescentada depois sem reescrever as telas.
+
+Também pendente: Fase 3 (painéis de administração) e o upload assinado
+do Cloudinary — bloqueado pelas credenciais (§3.7 do handoff).
+
 ## Onde cada tarefa é feita
 
 As tags indicam o repositório:

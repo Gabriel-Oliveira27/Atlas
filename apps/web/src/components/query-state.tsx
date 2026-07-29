@@ -17,14 +17,28 @@ interface QueryStateProps<T> {
   /** Mensagem quando a consulta volta vazia. */
   emptyMessage?: string;
   isEmpty?: (data: T) => boolean;
+  /**
+   * `bare` remove a moldura de card dos estados de carregamento e vazio.
+   * Use quando o QueryState já está DENTRO de um card — senão a tela
+   * mostra um card dentro do outro.
+   */
+  variant?: 'card' | 'bare';
 }
 
-export function QueryState<T>({ query, children, emptyMessage, isEmpty }: QueryStateProps<T>) {
+export function QueryState<T>({
+  query,
+  children,
+  emptyMessage,
+  isEmpty,
+  variant = 'card',
+}: QueryStateProps<T>) {
+  const bare = variant === 'bare';
+
   if (query.isLoading) {
     return (
       <div className="space-y-3" aria-busy="true">
-        <div className="h-24 animate-pulse rounded-card bg-surface" />
-        <div className="h-24 animate-pulse rounded-card bg-surface" />
+        <div className={`h-24 animate-pulse rounded-card ${bare ? 'bg-elevated' : 'bg-surface'}`} />
+        {!bare && <div className="h-24 animate-pulse rounded-card bg-surface" />}
       </div>
     );
   }
@@ -38,7 +52,7 @@ export function QueryState<T>({ query, children, emptyMessage, isEmpty }: QueryS
     const isAuth = isApi && (error.status === 401 || error.status === 403);
 
     return (
-      <div className="card border-danger/30 bg-danger/5">
+      <div className={bare ? '' : 'card border-danger/30 bg-danger/5'}>
         <h2 className="text-sm font-medium text-danger">
           {isAuth ? 'Sessão expirada' : 'Não foi possível carregar'}
         </h2>
@@ -72,7 +86,7 @@ export function QueryState<T>({ query, children, emptyMessage, isEmpty }: QueryS
 
   if (isEmpty?.(data)) {
     return (
-      <div className="card text-center">
+      <div className={bare ? 'py-6 text-center' : 'card text-center'}>
         <p className="text-sm text-ink-muted">{emptyMessage ?? 'Nada por aqui ainda.'}</p>
       </div>
     );
