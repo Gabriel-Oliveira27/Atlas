@@ -30,7 +30,7 @@
     "api:dev": "pnpm --filter @atlas/api dev",
     "api:expose": "node infra/scripts/expose-api.mjs",
     "bootstrap": "node infra/scripts/bootstrap.mjs",
-    "prepare": "husky"
+    "prepare": "node .husky/install.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.5.0",
