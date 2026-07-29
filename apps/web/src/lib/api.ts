@@ -15,7 +15,13 @@
 
 import type { ApiResponse, ErrorCode, PaginationMeta } from '@atlas/shared';
 import { clearSession, getSession, saveSession } from './session';
+import { getBaseUrl, invalidateEndpoint, resolveBaseUrl } from './endpoint';
 
+/**
+ * Endereço padrão, usado antes da primeira sondagem e quando não há
+ * reserva configurada. A escolha entre notebook e API hospedada vive em
+ * `endpoint.ts` — ver o porquê lá.
+ */
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3333/api';
 
 export class ApiError extends Error {
@@ -81,7 +87,7 @@ async function refreshTokens(): Promise<boolean> {
   if (!session?.refreshToken) return false;
 
   try {
-    const response = await fetch(`${BASE_URL}/auth/refresh`, {
+    const response = await fetch(`${getBaseUrl()}/auth/refresh`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ refreshToken: session.refreshToken, deviceId: session.deviceId }),
@@ -122,6 +128,10 @@ async function ensureRefreshed(): Promise<boolean> {
 async function execute<T>(path: string, options: RequestOptions, retrying = false): Promise<T> {
   const session = getSession();
 
+  // Decide entre notebook e reserva antes de cada requisição. É barato:
+  // a decisão fica em cache por minutos, e só sonda quando expira.
+  const baseUrl = await resolveBaseUrl();
+
   const headers: Record<string, string> = { 'content-type': 'application/json' };
 
   if (!options.skipAuth && session?.accessToken) {
@@ -134,17 +144,21 @@ async function execute<T>(path: string, options: RequestOptions, retrying = fals
   let response: Response;
 
   try {
-    response = await fetch(`${BASE_URL}${path}`, {
+    response = await fetch(`${baseUrl}${path}`, {
       method: options.method ?? 'GET',
       headers,
       ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     });
   } catch {
+    // O endereço escolhido pode ter caído no meio da sessão. Invalida a
+    // decisão para a próxima chamada sondar de novo — sem isso, o app
+    // insistiria no endereço morto até o cache expirar.
+    invalidateEndpoint();
     // Falha de rede: a API está fora, não é erro de aplicação.
     throw new ApiError(
       'NETWORK_ERROR',
-      'Não foi possível falar com a API. Ela está rodando em ' + BASE_URL + '?',
+      `Não foi possível falar com a API (${baseUrl}). Ela está no ar?`,
       0,
     );
   }

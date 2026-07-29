@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import { APP_NAME } from '@atlas/shared';
 import { clearSession, getSession, type Session } from '@/lib/session';
 import { api, getServedBy, subscribeServedBy } from '@/lib/api';
+import { getEndpointKind, subscribeEndpoint } from '@/lib/endpoint';
 import {
   IconCloud,
   IconDroplet,
@@ -49,6 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
   const [degraded, setDegraded] = useState(false);
+  const [onFallback, setOnFallback] = useState(false);
 
   useEffect(() => {
     const current = getSession();
@@ -65,6 +67,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setDegraded(getServedBy() === 'CLOUD');
     return subscribeServedBy((servedBy) => setDegraded(servedBy === 'CLOUD'));
+  }, []);
+
+  // Avisar que está na API de reserva não é firula: a sincronização com
+  // o Neon não é instantânea, então dados criados há pouco no servidor
+  // principal podem ainda não estar aqui.
+  useEffect(() => {
+    setOnFallback(getEndpointKind() === 'fallback');
+    return subscribeEndpoint((kind) => setOnFallback(kind === 'fallback'));
   }, []);
 
   function handleLogout() {
@@ -158,19 +168,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
             <span className="font-semibold tracking-tight">{APP_NAME}</span>
           </Link>
-          {degraded && (
+          {(degraded || onFallback) && (
             <span
               className="flex items-center gap-1.5 text-xs text-warning"
-              title="Operando pelo banco em nuvem"
+              title={
+                onFallback
+                  ? 'Servidor principal fora — usando o de reserva'
+                  : 'Operando pelo banco em nuvem'
+              }
             >
               <IconCloud size={14} />
-              contingência
+              {onFallback ? 'reserva' : 'contingência'}
             </span>
           )}
         </header>
 
-        {/* Aviso global de contingência (desktop) */}
-        {degraded && (
+        {/* Avisos globais (desktop). O de servidor vem primeiro: quando
+            os dois valem, a origem dos dados importa mais do que qual
+            banco os serviu. */}
+        {onFallback && (
+          <div className="hidden items-center gap-2 border-b border-warning/20 bg-warning/10 px-6 py-2 text-xs text-warning md:flex">
+            <IconCloud size={14} />
+            Servidor principal fora do ar — usando o de reserva. Alterações muito recentes podem
+            ainda não aparecer aqui.
+          </div>
+        )}
+
+        {degraded && !onFallback && (
           <div className="hidden items-center gap-2 border-b border-warning/20 bg-warning/10 px-6 py-2 text-xs text-warning md:flex">
             <IconCloud size={14} />
             Operando com o banco em nuvem — suas alterações serão reconciliadas quando o banco local

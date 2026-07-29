@@ -89,6 +89,19 @@ export const envSchema = z
      */
     CORS_ALLOW_LAN: z.enum(['true', 'false']).optional(),
 
+    /**
+     * Credenciais da documentação (`/docs`).
+     *
+     * Quando preenchidas, o Swagger passa a exigir Basic Auth — inclusive
+     * fora de produção. É o que permite deixar o `/docs` acessível pelo
+     * túnel sem publicar o mapa completo da API para qualquer um.
+     *
+     * Em produção o `/docs` só é servido SE estas existirem; sem elas,
+     * fica desligado em vez de aberto.
+     */
+    DOCS_USER: z.string().min(1).optional(),
+    DOCS_PASSWORD: z.string().min(8, 'Senha da documentação muito curta').optional(),
+
     // ── JWT ───────────────────────────────────────────────────
     JWT_ACCESS_SECRET: z.string().min(16, 'Segredo do access token muito curto'),
     JWT_ACCESS_TTL: z.string().default('15m'),

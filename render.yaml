@@ -1,0 +1,87 @@
+# API de reserva do Atlas.
+#
+# ── Para que serve ──────────────────────────────────────────────────
+# O back-end principal é o notebook, exposto por túnel: rápido, com o
+# Postgres na mesma máquina, e é onde os dados nascem. Mas ele desliga.
+# Esta instância existe para o produto continuar de pé nesse intervalo —
+# apontando para o Neon, que a sincronização (outbox → CLOUD) mantém
+# atualizado.
+#
+# Os clientes tentam o notebook primeiro e caem para cá sozinhos; a
+# lógica está em `endpoint.ts`, no web e no app.
+#
+# ── Como usar ───────────────────────────────────────────────────────
+# 1. render.com → New → Blueprint → aponte para este repositório.
+# 2. O Render lê este arquivo e cria o serviço.
+# 3. Preencha no painel os valores marcados como `sync: false`.
+#
+# ── O que esperar do plano gratuito ─────────────────────────────────
+# O serviço HIBERNA após ~15 min sem requisição, e a primeira chamada
+# depois disso leva uns 50 s para responder. Para uma reserva isso é
+# aceitável — mas explica por que os clientes sondam com timeout curto
+# em vez de esperar: sem o corte, o usuário encara a tela girando.
+
+services:
+  - type: web
+    name: atlas-api-reserva
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+
+    # `corepack enable` antes de tudo: o repositório fixa a versão do
+    # pnpm em `packageManager`, e sem o corepack o Render usaria npm.
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm db:generate &&
+      pnpm --filter "@atlas/api..." build
+
+    startCommand: node apps/api/dist/main.js
+
+    healthCheckPath: /api/health/live
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Sem Postgres local aqui: o Neon é o principal desta instância.
+      - key: DATABASE_PRIMARY
+        value: CLOUD
+
+      - key: API_HOST
+        value: 0.0.0.0
+
+      # O Render injeta a porta; a API precisa escutar exatamente nela.
+      - key: API_PORT
+        fromService:
+          type: web
+          name: atlas-api-reserva
+          property: port
+
+      # Em servidor, origem "privada" não é o seu notebook — é outra
+      # máquina do datacenter.
+      - key: CORS_ALLOW_LAN
+        value: 'false'
+
+      - key: CORS_ORIGINS
+        value: https://atlas-academia.vercel.app,https://*.vercel.app
+
+      # ── Preencher no painel (nunca no git) ──────────────────────────
+      # Gere os JWT com: node infra/scripts/gerar-segredos.mjs
+      - key: DATABASE_URL_CLOUD
+        sync: false
+      - key: DATABASE_URL_LOCAL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: REDIS_URL
+        sync: false
+
+      # Documentação: sem estas duas, a API NÃO serve /docs em produção.
+      - key: DOCS_USER
+        sync: false
+      - key: DOCS_PASSWORD
+        sync: false

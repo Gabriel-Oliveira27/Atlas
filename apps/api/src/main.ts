@@ -18,6 +18,7 @@ import { parseEnv } from '@atlas/validation';
 import { APP_NAME } from '@atlas/shared';
 import { AppModule } from './app.module.js';
 import { buildCorsOrigin } from './config/cors.js';
+import { buildDocsGuard } from './config/docs-auth.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { HttpMetricsInterceptor } from './common/interceptors/http-metrics.interceptor.js';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor.js';
@@ -88,7 +89,35 @@ async function bootstrap(): Promise<void> {
 
   app.enableShutdownHooks();
 
-  if (env.NODE_ENV !== 'production') {
+  /**
+   * Documentação.
+   *
+   * Fora de produção fica sempre disponível; em produção, SÓ com
+   * credenciais configuradas — sem elas, desliga em vez de abrir.
+   *
+   * Havendo `DOCS_USER`/`DOCS_PASSWORD`, o Basic Auth vale nos dois
+   * ambientes. Isso é o que permite consultar o `/docs` pelo túnel sem
+   * publicar o mapa inteiro da API: em desenvolvimento a máquina está
+   * exposta à internet do mesmo jeito que estaria em produção.
+   */
+  const docsCredentials =
+    env.DOCS_USER && env.DOCS_PASSWORD
+      ? { user: env.DOCS_USER, password: env.DOCS_PASSWORD }
+      : null;
+
+  const docsEnabled = env.NODE_ENV !== 'production' || docsCredentials !== null;
+
+  if (docsEnabled) {
+    if (docsCredentials) {
+      // `as never` pelo mesmo motivo dos registros de helmet/cookie
+      // acima: atrito de tipagem entre os pacotes, não incompatibilidade
+      // em tempo de execução.
+      app
+        .getHttpAdapter()
+        .getInstance()
+        .addHook('onRequest', buildDocsGuard(docsCredentials) as never);
+    }
+
     const config = new DocumentBuilder()
       .setTitle(`${APP_NAME} API`)
       .setDescription(
@@ -109,9 +138,12 @@ async function bootstrap(): Promise<void> {
   const logger = app.get(Logger);
   logger.log(`Atlas API em http://localhost:${env.API_PORT}/${env.API_PREFIX}`);
 
-  if (env.NODE_ENV !== 'production') {
-    logger.log(`Documentação em http://localhost:${env.API_PORT}/docs`);
+  if (docsEnabled) {
+    const protecao = docsCredentials ? 'protegida por usuário e senha' : 'ABERTA';
+    logger.log(`Documentação em http://localhost:${env.API_PORT}/docs — ${protecao}`);
+  }
 
+  if (env.NODE_ENV !== 'production') {
     // Anuncia os endereços de rede local: é exatamente o valor que o
     // aplicativo precisa em EXPO_PUBLIC_API_URL, e descobri-lo por
     // `ipconfig` toda vez que o DHCP renova custa mais do que imprimir.
