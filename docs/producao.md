@@ -201,6 +201,21 @@ No painel do projeto:
 | **Root Directory** | `apps/web` |
 | Framework Preset   | Next.js    |
 
+> **Salvar a configuração NÃO republica.** A Vercel só aplica o Root
+> Directory no próximo deploy — é preciso ir em **Deployments → ⋯ →
+> Redeploy** (com "Use existing Build Cache" **desmarcado**) ou empurrar
+> um commit. Sem isso, o site segue servindo o build antigo, e o sintoma
+> é a configuração parecer que não pegou.
+>
+> Para conferir sem cair no cache da CDN, peça uma rota que só existe no
+> web:
+>
+> ```bash
+> curl -o /dev/null -w "%{http_code}\n" "https://SEU-SITE.vercel.app/login?cb=1"
+> ```
+>
+> `200` = certo. `404` = ainda é o painel admin.
+
 O `apps/web/vercel.json` cuida do resto. O ponto que ele resolve não é
 óbvio: `@atlas/shared` e `@atlas/validation` resolvem para `dist/`, que
 **não existe antes de compilar**. O comando

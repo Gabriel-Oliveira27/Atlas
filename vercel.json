@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "//": "Usado quando o Root Directory da Vercel está na RAIZ do repositório. Se ele apontar para apps/web, quem vale é apps/web/vercel.json — a Vercel lê o arquivo do diretório raiz configurado, não os dois. Ter os dois cobre as duas configurações e evita publicar o app errado.",
+
+  "framework": "nextjs",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter \"@atlas/web...\" build",
+  "outputDirectory": "apps/web/.next"
+}
