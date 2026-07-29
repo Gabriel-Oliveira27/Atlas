@@ -63,10 +63,40 @@ export class SyncService {
     private readonly prisma: PrismaService,
     private readonly config: EnvConfig,
   ) {
-    // Assim que o banco local voltar, reconcilia o que foi escrito no Neon.
-    this.prisma.onLocalRecovered(async () => {
+    // O principal voltou: houve escrita no secundário durante a queda, e
+    // escrita nova no principal depois dela. Os dois sentidos.
+    this.prisma.onPrimaryRecovered(async () => {
       await this.run({ trigger: SYNC_TRIGGER.RECONNECT, direction: SYNC_DIRECTION.BIDIRECTIONAL });
     });
+
+    // O secundário voltou: ele estava FORA, então não tem escrita nova a
+    // oferecer — só tem atraso a receber. Um sentido só, do principal
+    // para ele, que é mais barato e não inventa conflito.
+    this.prisma.onSecondaryAvailable(async () => {
+      await this.run({
+        trigger: SYNC_TRIGGER.RECONNECT,
+        direction: this.directionTowardSecondary(),
+      });
+    });
+  }
+
+  /** Sentido que leva do banco principal para o secundário. */
+  private directionTowardSecondary(): SyncDirection {
+    return this.prisma.primaryNode === DATABASE_NODE.LOCAL
+      ? SYNC_DIRECTION.LOCAL_TO_CLOUD
+      : SYNC_DIRECTION.CLOUD_TO_LOCAL;
+  }
+
+  /**
+   * Banco onde a execução fica registrada (SyncRun, contadores).
+   *
+   * Era sempre o local. Com o Neon principal isso significava não
+   * conseguir registrar nada enquanto o notebook está desligado — que é
+   * exatamente quando a sincronização mais tem o que fazer. Passa a ser o
+   * principal, com o nó ativo como reserva.
+   */
+  private bookkeeping(): PrismaClient {
+    return this.prisma.primary ?? this.prisma.db;
   }
 
   get isRunning(): boolean {
@@ -90,8 +120,10 @@ export class SyncService {
     this.running = true;
     const direction = options.direction ?? SYNC_DIRECTION.BIDIRECTIONAL;
 
-    // O registro da execução vai no banco local: é a base histórica.
-    const run = await local.syncRun.create({
+    // O registro da execução vai no banco principal — ver bookkeeping().
+    const books = this.bookkeeping();
+
+    const run = await books.syncRun.create({
       data: {
         trigger: options.trigger,
         direction,
@@ -122,7 +154,7 @@ export class SyncService {
 
       const status = failed > 0 ? SYNC_RUN_STATUS.PARTIAL : SYNC_RUN_STATUS.SUCCESS;
 
-      const finished = await local.syncRun.update({
+      const finished = await books.syncRun.update({
         where: { id: run.id },
         data: {
           status,
@@ -144,7 +176,7 @@ export class SyncService {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error({ err: error }, `Falha na sincronização: ${message}`);
 
-      const failedRun = await local.syncRun.update({
+      const failedRun = await books.syncRun.update({
         where: { id: run.id },
         data: {
           status: SYNC_RUN_STATUS.FAILED,
@@ -349,12 +381,15 @@ export class SyncService {
   /** Estado atual da sincronização — alimenta o painel de administração. */
   async getStatus(): Promise<SyncStatusResponse> {
     const health = this.prisma.getHealth();
-    const local = this.prisma.local;
+    // Lê de onde a execução foi registrada, não do local fixo: com o Neon
+    // principal e o notebook desligado, ler do local devolveria erro de
+    // conexão em vez do estado da sincronização.
+    const books = this.bookkeeping();
 
     const [pendingChanges, unresolvedConflicts, lastRun] = await Promise.all([
-      local.changeLog.count({ where: { status: CHANGE_STATUS.PENDING } }),
-      local.syncConflict.count({ where: { resolved: false } }),
-      local.syncRun.findFirst({ orderBy: { startedAt: 'desc' } }),
+      books.changeLog.count({ where: { status: CHANGE_STATUS.PENDING } }),
+      books.syncConflict.count({ where: { resolved: false } }),
+      books.syncRun.findFirst({ orderBy: { startedAt: 'desc' } }),
     ]);
 
     return {

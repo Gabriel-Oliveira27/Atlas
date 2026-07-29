@@ -32,7 +32,11 @@ export type ChangeStatus = (typeof CHANGE_STATUS)[keyof typeof CHANGE_STATUS];
 export const SYNC_TRIGGER = {
   /** Agendamento fixo: 03:00 e 18:00 (America/Sao_Paulo). */
   SCHEDULED: 'SCHEDULED',
-  /** Banco local voltou a responder — reconciliação imediata. */
+  /**
+   * Um dos bancos voltou a responder — reconciliação imediata. Vale para
+   * o principal voltando (reconcilia nos dois sentidos) e para o
+   * secundário voltando (recebe o que perdeu enquanto esteve fora).
+   */
   RECONNECT: 'RECONNECT',
   /** Disparo manual (admin ou workflow do n8n). */
   MANUAL: 'MANUAL',

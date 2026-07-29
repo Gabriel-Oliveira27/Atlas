@@ -39,7 +39,10 @@ function buildClient(url: string, logQueries: boolean): PrismaClient {
   });
 }
 
-/** Cliente do banco LOCAL — o principal do sistema. */
+/**
+ * Cliente do banco LOCAL — secundário desde o ADR 008, e ainda assim o
+ * datasource do schema: é dele que saem migrations e `prisma generate`.
+ */
 export function getLocalClient(options: DatabaseClientOptions): PrismaClient {
   if (!globalForPrisma.atlasLocalClient) {
     globalForPrisma.atlasLocalClient = buildClient(options.localUrl, options.logQueries ?? false);

@@ -15,6 +15,7 @@ import {
   type DatabaseHealth,
   type NodeChangeEvent,
   type PrismaClient,
+  type SecondaryAvailableEvent,
 } from '@atlas/database';
 import { DATABASE_NODE, type DatabaseNode } from '@atlas/shared';
 import { EnvConfig } from '../../config/env.config.js';
@@ -27,6 +28,8 @@ import { EnvConfig } from '../../config/env.config.js';
  */
 export const DB_FAILOVER_EVENT = 'database.failover.cloud';
 export const DB_RECOVERY_EVENT = 'database.failover.recovered';
+/** O secundário voltou — redundância restabelecida, sem troca de nó ativo. */
+export const DB_SECONDARY_BACK_EVENT = 'database.secondary.available';
 
 @Injectable()
 export class PrismaService implements OnModuleInit, OnApplicationShutdown {
@@ -34,11 +37,16 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
   private readonly router: DatabaseRouter;
 
   /**
-   * Callbacks disparados quando o banco local volta. O módulo de
+   * Callbacks disparados quando o banco PRINCIPAL volta. O módulo de
    * sincronização se registra aqui — evita que este serviço dependa
    * dele (o que criaria uma dependência circular).
    */
   private readonly recoveryListeners: Array<(event: NodeChangeEvent) => void | Promise<void>> = [];
+
+  /** Callbacks disparados quando o banco SECUNDÁRIO volta a responder. */
+  private readonly secondaryListeners: Array<
+    (event: SecondaryAvailableEvent) => void | Promise<void>
+  > = [];
 
   constructor(private readonly config: EnvConfig) {
     const clients = createDatabaseClients({
@@ -53,6 +61,7 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
       healthCheckIntervalMs: this.config.database.healthCheckIntervalMs,
       healthCheckTimeoutMs: this.config.database.healthCheckTimeoutMs,
       onNodeChange: (event) => this.handleNodeChange(event),
+      onSecondaryAvailable: (event) => this.handleSecondaryAvailable(event),
     });
   }
 
@@ -60,16 +69,33 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
     await this.router.start();
 
     const health = this.router.getHealth();
+    const primary = this.router.getPrimaryNode();
 
-    if (!health.local.available) {
+    // `DATABASE_PRIMARY=CLOUD` sem `DATABASE_URL_CLOUD` é contradição, e
+    // silenciosa: o Neon nunca responde, a API atende tudo pelo local e
+    // se declara degradada para sempre. Melhor dizer isso no boot.
+    if (primary === DATABASE_NODE.CLOUD && !this.config.database.cloudUrl) {
+      this.logger.error(
+        'DATABASE_PRIMARY=CLOUD mas DATABASE_URL_CLOUD está vazio. ' +
+          'A API vai atender pelo banco local e se reportar degradada indefinidamente. ' +
+          'Configure a URL do Neon ou volte DATABASE_PRIMARY para LOCAL.',
+      );
+    }
+
+    const primaryHealth = primary === DATABASE_NODE.LOCAL ? health.local : health.cloud;
+
+    if (!primaryHealth?.available) {
+      const secondaryUp =
+        primary === DATABASE_NODE.LOCAL ? health.cloud?.available : health.local.available;
+
       this.logger.warn(
-        `Banco LOCAL indisponível (${health.local.error ?? 'sem detalhe'}). ` +
-          (health.cloud?.available
-            ? 'Operando temporariamente com o Neon.'
-            : 'O Neon também está indisponível — a API responderá 503.'),
+        `Banco PRINCIPAL (${primary}) indisponível (${primaryHealth?.error ?? 'sem detalhe'}). ` +
+          (secondaryUp
+            ? 'Operando temporariamente pelo secundário.'
+            : 'O secundário também está indisponível — a API responderá 503.'),
       );
     } else {
-      this.logger.log(`Banco LOCAL disponível (${health.local.latencyMs} ms).`);
+      this.logger.log(`Banco PRINCIPAL (${primary}) disponível (${primaryHealth.latencyMs} ms).`);
     }
 
     if (!this.config.database.cloudUrl) {
@@ -103,6 +129,26 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
     return this.router.getActiveNode();
   }
 
+  /** Qual banco é o principal nesta instalação (`DATABASE_PRIMARY`). */
+  get primaryNode(): DatabaseNode {
+    return this.router.getPrimaryNode();
+  }
+
+  /**
+   * Cliente do banco principal, para escrita de controle da própria
+   * sincronização (SyncRun, contadores). Difere de `db`: `db` cai para o
+   * secundário em contingência, este devolve `null` quando o principal
+   * está fora — quem chama decide se tem sentido registrar no secundário.
+   */
+  get primary(): PrismaClient | null {
+    const node = this.router.getPrimaryNode();
+    const client = node === DATABASE_NODE.LOCAL ? this.local : this.cloud;
+    const health = this.router.getHealth();
+    const available =
+      node === DATABASE_NODE.LOCAL ? health.local.available : health.cloud?.available;
+    return available ? client : null;
+  }
+
   /** true quando estamos em contingência (Neon substituindo o local). */
   get isDegraded(): boolean {
     return this.router.isDegraded();
@@ -116,20 +162,32 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
     return this.router.checkHealth();
   }
 
-  /** Registra um callback para quando o banco local retornar. */
-  onLocalRecovered(listener: (event: NodeChangeEvent) => void | Promise<void>): void {
+  /** Registra um callback para quando o banco PRINCIPAL retornar. */
+  onPrimaryRecovered(listener: (event: NodeChangeEvent) => void | Promise<void>): void {
     this.recoveryListeners.push(listener);
   }
 
+  /**
+   * Registra um callback para quando o banco SECUNDÁRIO voltar a
+   * responder — o gancho que mantém o secundário atualizado sem esperar
+   * a janela agendada.
+   */
+  onSecondaryAvailable(listener: (event: SecondaryAvailableEvent) => void | Promise<void>): void {
+    this.secondaryListeners.push(listener);
+  }
+
   private async handleNodeChange(event: NodeChangeEvent): Promise<void> {
-    if (event.to === DATABASE_NODE.CLOUD) {
+    const primary = this.router.getPrimaryNode();
+
+    if (event.to !== primary) {
       // ERROR, não WARN: o banco principal caiu. O usuário já vê o
       // banner na UI, mas o banner não acorda ninguém — este log é o
       // gancho de alerta. `event` é o campo estável para a regra do
       // pipeline de observabilidade; a mensagem pode mudar, ele não.
       this.logger.error(
         { event: DB_FAILOVER_EVENT, from: event.from, to: event.to },
-        'FAILOVER: banco local indisponível — assumindo o Neon. As alterações serão reconciliadas quando o local voltar.',
+        `FAILOVER: banco principal (${primary}) indisponível — assumindo o ${event.to}. ` +
+          'As alterações serão reconciliadas quando o principal voltar.',
       );
 
       await this.recordFailoverAudit(DB_FAILOVER_EVENT, event);
@@ -139,7 +197,7 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
     if (event.recovered) {
       this.logger.log(
         { event: DB_RECOVERY_EVENT, from: event.from, to: event.to },
-        'Banco local restabelecido — iniciando reconciliação.',
+        `Banco principal (${primary}) restabelecido — iniciando reconciliação.`,
       );
 
       await this.recordFailoverAudit(DB_RECOVERY_EVENT, event);
@@ -157,6 +215,28 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
     }
 
     this.logger.log(`Banco ativo: ${event.to}.`);
+  }
+
+  /**
+   * O secundário voltou. Não há troca de nó ativo — o principal continua
+   * atendendo — mas o secundário está atrás das escritas do período em
+   * que esteve fora, e é isso que os ouvintes vêm corrigir.
+   */
+  private async handleSecondaryAvailable(event: SecondaryAvailableEvent): Promise<void> {
+    this.logger.log(
+      { event: DB_SECONDARY_BACK_EVENT, node: event.node },
+      `Banco secundário (${event.node}) voltou a responder — atualizando-o a partir do principal.`,
+    );
+
+    for (const listener of this.secondaryListeners) {
+      try {
+        await listener(event);
+      } catch (error) {
+        // O secundário desatualizado é um problema de redundância, não de
+        // atendimento: o principal segue servindo. Não pode derrubar nada.
+        this.logger.error({ err: error }, 'Falha ao atualizar o banco secundário.');
+      }
+    }
   }
 
   /**

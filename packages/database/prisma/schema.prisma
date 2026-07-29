@@ -2,8 +2,11 @@
 // ATLAS — Schema do banco de dados
 //
 // Um único schema serve aos DOIS bancos:
-//   • PostgreSQL local (Docker, porta 5433) — PRINCIPAL
-//   • Neon PostgreSQL (nuvem)               — SECUNDÁRIO / failover / backup
+//   • Neon PostgreSQL (nuvem)               — PRINCIPAL (ADR 008)
+//   • PostgreSQL local (Docker, porta 5433) — SECUNDÁRIO / failover / backup
+//
+// O local é secundário desde 29/07/2026, mas continua aceitando escrita —
+// e continua sendo o datasource abaixo, de onde saem migrations e generate.
 //
 // O `datasource` abaixo aponta para o banco local. O cliente da nuvem é
 // criado em runtime com `new PrismaClient({ datasources: { db: { url } } })`

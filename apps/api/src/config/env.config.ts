@@ -123,6 +123,9 @@ export class EnvConfig {
       batchSize: this.env.SYNC_BATCH_SIZE,
       maxRetries: this.env.SYNC_MAX_RETRIES,
       retryBackoffMs: this.env.SYNC_RETRY_BACKOFF_MS,
+      retentionEnabled: this.env.SYNC_RETENTION_ENABLED,
+      retentionDays: this.env.SYNC_RETENTION_DAYS,
+      retentionCron: this.env.SYNC_RETENTION_CRON,
     };
   }
 

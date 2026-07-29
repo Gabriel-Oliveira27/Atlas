@@ -1,6 +1,11 @@
 # ADR 003 — PostgreSQL local como banco principal, Neon como secundário
 
-**Status:** aceito
+**Status:** parcialmente superado pelo
+[ADR 008](008-neon-principal-local-secundario.md) — desde 29/07/2026 o
+principal é o Neon. O motivo está lá: o notebook desliga, e o produto
+saía do ar com ele. Continua valendo daqui o schema único, a regra de
+roteamento (que virou simétrica), o custo de sincronização e a seção
+"quando reconsiderar" — que é justamente o que se cumpriu.
 **Data:** 2026-07-27
 
 ## Contexto

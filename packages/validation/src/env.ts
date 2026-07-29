@@ -40,7 +40,18 @@ export const envSchema = z
       .optional()
       .transform((value) => (value === '' ? undefined : value)),
     SHADOW_DATABASE_URL: z.string().optional(),
-    DATABASE_PRIMARY: z.enum(['LOCAL', 'CLOUD']).default('LOCAL'),
+    /**
+     * Qual banco atende quando os dois respondem.
+     *
+     * O padrão é CLOUD desde 29/07/2026. O Atlas nasceu LOCAL — ver
+     * ADR 003 e a emenda no ADR 008 — mas o notebook desliga, e com ele
+     * saía o produto: o app aponta para a máquina de casa e ficava sem
+     * back-end. O Neon está sempre de pé, então virou o principal.
+     *
+     * LOCAL continua válido e é o que faz sentido numa instalação com
+     * Postgres na mesma rede dos usuários (latência de milissegundos).
+     */
+    DATABASE_PRIMARY: z.enum(['LOCAL', 'CLOUD']).default('CLOUD'),
     DATABASE_HEALTHCHECK_INTERVAL_MS: z.coerce.number().int().min(1000).default(15_000),
     DATABASE_HEALTHCHECK_TIMEOUT_MS: z.coerce.number().int().min(500).default(3_000),
 
@@ -147,6 +158,26 @@ export const envSchema = z
     SYNC_BATCH_SIZE: z.coerce.number().int().min(1).max(5000).default(500),
     SYNC_MAX_RETRIES: z.coerce.number().int().min(0).max(20).default(5),
     SYNC_RETRY_BACKOFF_MS: z.coerce.number().int().min(100).default(5_000),
+
+    // ── Retenção do rastro da sincronização ───────────────────
+    // O que cresce sem limite nos dois bancos não é o histórico do
+    // usuário (datas e inteiros, poucas centenas de bytes por linha, e
+    // as fotos ficam no Cloudinary) — é o rastro do próprio motor:
+    // `ChangeLog` guarda uma cópia JSON INTEGRAL da linha a cada
+    // escrita, e nada nunca podava. Mais `SyncRun` e `SyncConflict` já
+    // resolvido.
+    //
+    // Estas três tabelas não estão em SYNC_ENTITIES, então apagá-las não
+    // gera outbox novo — a poda não se propaga como se fosse uma
+    // exclusão de dado do usuário.
+    SYNC_RETENTION_ENABLED: z.coerce.boolean().default(true),
+    /**
+     * Idade mínima para podar. Só alcança entrada já SYNCED, execução já
+     * encerrada e conflito já resolvido — nada pendente é tocado, em
+     * nenhuma idade.
+     */
+    SYNC_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+    SYNC_RETENTION_CRON: z.string().default('30 4 * * *'),
 
     // ── Rate limit / logs ─────────────────────────────────────
     // O limite padrão vale para leituras. As famílias abaixo cobrem as
