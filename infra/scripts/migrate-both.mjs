@@ -1,12 +1,19 @@
 #!/usr/bin/env node
 /**
- * Aplica as migrations nos DOIS bancos (local e Neon).
+ * Aplica as migrations nos bancos (local e/ou Neon).
  *
  * Os bancos precisam ter estrutura idêntica — a reconciliação compara
  * registros campo a campo, e uma coluna faltando de um lado quebraria a
  * sincronização em produção, não no deploy.
  *
- *   node infra/scripts/migrate-both.mjs
+ *   node infra/scripts/migrate-both.mjs            os dois
+ *   node infra/scripts/migrate-both.mjs --cloud    só o Neon
+ *   node infra/scripts/migrate-both.mjs --local    só o Docker
+ *
+ * O recorte existe para o caso da API hospedada, que serve do Neon: dá
+ * para aplicar o schema lá sem precisar do Docker no ar. Aplicar as
+ * migrations a partir do próprio serviço hospedado seria pior — dois
+ * deploys simultâneos disputariam a mesma tabela de controle.
  */
 
 import { execSync } from 'node:child_process';
@@ -81,22 +88,34 @@ const env = readEnvFile();
 const localUrl = env.DATABASE_URL_LOCAL;
 const cloudUrl = env.DATABASE_URL_CLOUD;
 
-if (!localUrl) {
+// Sem flag, os dois — que é o comportamento histórico do script.
+const apenasNuvem = process.argv.includes('--cloud');
+const apenasLocal = process.argv.includes('--local');
+const querLocal = !apenasNuvem;
+const querNuvem = !apenasLocal;
+
+if (querLocal && !localUrl) {
   console.error('✗ DATABASE_URL_LOCAL não está definido no .env.');
   process.exit(1);
 }
 
-console.info('═══ Atlas — migrations nos dois bancos ═══');
+if (apenasNuvem && !cloudUrl) {
+  console.error('✗ DATABASE_URL_CLOUD não está definido no .env.');
+  console.error('  Pegue a connection string em https://console.neon.tech (Pooled).');
+  process.exit(1);
+}
 
-const localOk = migrate('Banco LOCAL (Docker)', localUrl, env.SHADOW_DATABASE_URL);
+console.info('═══ Atlas — migrations ═══');
+
+const localOk = querLocal ? migrate('Banco LOCAL (Docker)', localUrl, env.SHADOW_DATABASE_URL) : true;
 
 let cloudOk = true;
 
-if (cloudUrl) {
+if (querNuvem && cloudUrl) {
   // O Neon gerencia o shadow database sozinho; passar um do local
   // faria o Prisma tentar criar tabelas no lugar errado.
   cloudOk = migrate('Banco NUVEM (Neon)', cloudUrl, undefined);
-} else {
+} else if (querNuvem) {
   console.warn('\n⚠ DATABASE_URL_CLOUD não configurado — apenas o banco local foi migrado.');
   console.warn('  Sem o Neon não há failover nem sincronização com a nuvem.');
 }

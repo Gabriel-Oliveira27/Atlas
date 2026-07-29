@@ -36,9 +36,18 @@ services:
     # "EROFS: read-only file system, unlink '/usr/bin/pnpm'".
     # Chamado direto, o corepack executa o pnpm da versão fixada em
     # `packageManager` sem instalar nada fora do projeto.
+    # `generate:ci` em vez de `db:generate`: o segundo passa por
+    # `dotenv -e ../../.env`, e o .env não existe aqui (é ignorado pelo
+    # git). As variáveis vêm do painel, direto no ambiente do processo.
+    #
+    # A linha do `node -e` existe para o próximo erro se explicar
+    # sozinho: se o `prisma generate` falhar com "Environment variable
+    # not found", o log logo acima já diz se a variável chegou ao build
+    # — o que separa "não configurei" de "configurei e não passou".
     buildCommand: >-
       corepack pnpm install --frozen-lockfile &&
-      corepack pnpm db:generate &&
+      node -e "console.log('DATABASE_URL_LOCAL presente no build?', Boolean(process.env.DATABASE_URL_LOCAL))" &&
+      corepack pnpm --filter @atlas/database generate:ci &&
       corepack pnpm --filter "@atlas/api..." build
 
     startCommand: node apps/api/dist/main.js

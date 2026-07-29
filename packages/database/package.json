@@ -13,9 +13,11 @@
   },
   "scripts": {
     "generate": "dotenv -e ../../.env -- prisma generate --schema prisma/schema.prisma",
+    "generate:ci": "prisma generate --schema prisma/schema.prisma",
+    "migrate:deploy:ci": "prisma migrate deploy --schema prisma/schema.prisma",
     "migrate:local": "dotenv -e ../../.env -- prisma migrate dev --schema prisma/schema.prisma",
     "migrate:deploy": "dotenv -e ../../.env -- prisma migrate deploy --schema prisma/schema.prisma",
-    "migrate:cloud": "node ./scripts/migrate-cloud.mjs",
+    "migrate:cloud": "node ../../infra/scripts/migrate-both.mjs --cloud",
     "push": "dotenv -e ../../.env -- prisma db push --schema prisma/schema.prisma",
     "seed": "dotenv -e ../../.env -- tsx prisma/seed.ts",
     "studio": "dotenv -e ../../.env -- prisma studio --schema prisma/schema.prisma",
