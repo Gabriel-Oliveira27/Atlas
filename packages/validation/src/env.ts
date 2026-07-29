@@ -214,7 +214,18 @@ export type AtlasEnv = z.infer<typeof envSchema>;
  * Lança erro com a lista completa de problemas quando algo falta.
  */
 export function parseEnv(source: NodeJS.ProcessEnv = process.env): AtlasEnv {
-  const result = envSchema.safeParse(source);
+  /**
+   * Hospedagens (Render, Railway, Fly, Heroku) escolhem a porta e a
+   * injetam em `PORT`. A API lê `API_PORT` — sem esta ponte ela subiria
+   * na 3333, o serviço não responderia ao health check e o deploy seria
+   * derrubado por "no open ports detected", que não diz o que houve.
+   *
+   * `API_PORT` explícito continua tendo precedência: quem definiu quis.
+   */
+  const normalized: NodeJS.ProcessEnv =
+    !source.API_PORT && source.PORT ? { ...source, API_PORT: source.PORT } : source;
+
+  const result = envSchema.safeParse(normalized);
 
   if (!result.success) {
     const issues = result.error.issues

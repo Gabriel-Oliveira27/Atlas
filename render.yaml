@@ -52,12 +52,10 @@ services:
       - key: API_HOST
         value: 0.0.0.0
 
-      # O Render injeta a porta; a API precisa escutar exatamente nela.
-      - key: API_PORT
-        fromService:
-          type: web
-          name: atlas-api-reserva
-          property: port
+      # API_PORT não aparece aqui de propósito: o Render injeta a porta
+      # em `PORT`, e o `parseEnv` usa esse valor quando `API_PORT` não
+      # está definido. Fixar um número aqui faria o serviço escutar na
+      # porta errada e o deploy morrer em "no open ports detected".
 
       # Em servidor, origem "privada" não é o seu notebook — é outra
       # máquina do datacenter.
