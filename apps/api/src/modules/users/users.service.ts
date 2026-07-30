@@ -24,7 +24,7 @@ import type {
   UpdatePreferencesInput,
   UpdateProfileInput,
 } from '@atlas/validation';
-import { CHANGE_OPERATION, DATABASE_NODE } from '@atlas/shared';
+import { CHANGE_OPERATION } from '@atlas/shared';
 import { EnvConfig } from '../../config/env.config.js';
 import { PrismaService } from '../../infra/prisma/prisma.service.js';
 
@@ -97,7 +97,7 @@ export class UsersService {
           payload: input as never,
           version: updated.version,
           originNode: this.config.nodeId,
-          targetNode: DATABASE_NODE.CLOUD,
+          targetNode: this.prisma.replicationTarget,
         },
       });
 
@@ -211,7 +211,7 @@ export class UsersService {
           payload: log as never,
           version: log.version,
           originNode: this.config.nodeId,
-          targetNode: DATABASE_NODE.CLOUD,
+          targetNode: this.prisma.replicationTarget,
         },
       });
 

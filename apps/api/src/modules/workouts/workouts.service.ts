@@ -11,7 +11,6 @@ import { Injectable } from '@nestjs/common';
 import {
   AppError,
   CHANGE_OPERATION,
-  DATABASE_NODE,
   ERROR_CODES,
   buildPaginationMeta,
   calculateVolumeLoad,
@@ -141,7 +140,7 @@ export class WorkoutsService {
           payload: log as never,
           version: log.version,
           originNode: this.config.nodeId,
-          targetNode: DATABASE_NODE.CLOUD,
+          targetNode: this.prisma.replicationTarget,
         },
       });
 
@@ -221,7 +220,7 @@ export class WorkoutsService {
           payload: set as never,
           version: set.version,
           originNode: this.config.nodeId,
-          targetNode: DATABASE_NODE.CLOUD,
+          targetNode: this.prisma.replicationTarget,
         },
       });
 
@@ -279,7 +278,7 @@ export class WorkoutsService {
           payload: updated as never,
           version: updated.version,
           originNode: this.config.nodeId,
-          targetNode: DATABASE_NODE.CLOUD,
+          targetNode: this.prisma.replicationTarget,
         },
       });
 
