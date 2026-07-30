@@ -100,6 +100,23 @@ services:
       - key: DATABASE_PRIMARY
         value: CLOUD
 
+      # Esta instância NÃO sincroniza, e é de propósito.
+      #
+      # Aqui `DATABASE_URL_LOCAL` recebe a mesma string do Neon (ver a
+      # nota lá embaixo), então os dois clientes Prisma apontam para o
+      # MESMO banco. Sincronizar nessas condições é o motor lendo o
+      # próprio outbox e aplicando no banco de onde acabou de ler: a
+      # linha já existe com a mesma `version`, o que cai no ramo de
+      # empate do `applyChange` e GRAVA UM SyncConflict falso por
+      # alteração, duas vezes ao dia. Quem sincroniza de verdade é o
+      # notebook, que tem os dois bancos separados.
+      #
+      # A poda de retenção continua ligada — ela não depende desta
+      # variável, justamente para o Neon não crescer sem limite enquanto
+      # o notebook passa dias desligado.
+      - key: SYNC_ENABLED
+        value: 'false'
+
       - key: API_HOST
         value: 0.0.0.0
 
@@ -136,6 +153,20 @@ services:
         sync: false
       - key: JWT_REFRESH_SECRET
         sync: false
+
+      # OPCIONAL — pode deixar em branco.
+      #
+      # O plano gratuito do Render não inclui Redis. Sem ele o rate limit
+      # cai para um contador em memória do processo (aceitável numa
+      # instância só) e nada mais é perdido: não há fila BullMQ no
+      # projeto, apesar do que dizia o comentário no RedisService.
+      #
+      # Preencher só faz sentido apontando para um Redis externo. ATENÇÃO
+      # ao histórico: um Redis inalcançável costumava PENDURAR toda
+      # requisição, inclusive o health check, e derrubava o deploy em
+      # "service unhealthy" com a API no ar e muda. Corrigido em
+      # `redis.service.ts` e `throttler-redis.storage.ts` — hoje um Redis
+      # ausente degrada, não trava.
       - key: REDIS_URL
         sync: false
 

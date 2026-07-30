@@ -14,9 +14,32 @@ export class RedisService implements OnModuleInit, OnApplicationShutdown {
   constructor(private readonly config: EnvConfig) {
     this.client = new Redis(this.config.redis.url, {
       keyPrefix: `${this.config.redis.prefix}:`,
-      // Exigido pelo BullMQ: sem isto, um comando pendente pode ficar
-      // preso indefinidamente quando o Redis cai.
-      maxRetriesPerRequest: null,
+
+      /**
+       * As duas opções abaixo existem para o comando FALHAR quando o
+       * Redis não está lá — e não esperar por ele.
+       *
+       * A versão anterior usava `maxRetriesPerRequest: null` com a fila
+       * offline no padrão (ligada), justificado como exigência do
+       * BullMQ. O raciocínio estava invertido, e o BullMQ não é usado em
+       * lugar nenhum do projeto: essa combinação faz o ioredis
+       * ENFILEIRAR o comando enquanto o cliente está `reconnecting`, sem
+       * nunca resolver nem rejeitar a promise.
+       *
+       * O efeito era o pior possível numa hospedagem sem Redis: o
+       * `AtlasThrottlerGuard` é o primeiro APP_GUARD e roda em TODA
+       * requisição, inclusive em `/api/health/live`. O `await` no Redis
+       * não voltava, o catch que cai para o contador em memória nunca
+       * disparava, e toda requisição pendurava para sempre — o health
+       * check do Render estourava por timeout e o deploy morria em
+       * "service unhealthy", com a API "de pé" e muda.
+       *
+       * Com a fila offline desligada, o comando rejeita de imediato
+       * ("Stream isn't writeable"), o fallback funciona e a API atende.
+       */
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+
       enableReadyCheck: true,
       lazyConnect: true,
       retryStrategy: (attempt) => Math.min(attempt * 200, 5_000),
@@ -40,6 +63,17 @@ export class RedisService implements OnModuleInit, OnApplicationShutdown {
 
   async onApplicationShutdown(): Promise<void> {
     await this.client.quit().catch(() => this.client.disconnect());
+  }
+
+  /**
+   * O cliente está pronto para receber comando agora?
+   *
+   * Quem está no caminho de uma requisição deve checar isto ANTES de
+   * chamar o Redis: pergunta sobre estado em memória, não faz I/O, e é a
+   * diferença entre degradar na hora e pagar o timeout de um socket.
+   */
+  get isReady(): boolean {
+    return this.client.status === 'ready';
   }
 
   async ping(timeoutMs = 2000): Promise<{ ok: boolean; latencyMs: number; error?: string }> {

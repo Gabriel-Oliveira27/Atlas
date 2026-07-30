@@ -27,18 +27,22 @@ export class SyncScheduler implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    if (!this.config.sync.enabled) {
+    if (this.config.sync.enabled) {
+      this.schedule('atlas-sync-morning', this.config.sync.cronMorning, () =>
+        this.executeSync('atlas-sync-morning'),
+      );
+      this.schedule('atlas-sync-evening', this.config.sync.cronEvening, () =>
+        this.executeSync('atlas-sync-evening'),
+      );
+    } else {
       this.logger.warn('Sincronização agendada desabilitada (SYNC_ENABLED=false).');
-      return;
     }
 
-    this.schedule('atlas-sync-morning', this.config.sync.cronMorning, () =>
-      this.executeSync('atlas-sync-morning'),
-    );
-    this.schedule('atlas-sync-evening', this.config.sync.cronEvening, () =>
-      this.executeSync('atlas-sync-evening'),
-    );
-
+    // A poda NÃO depende de SYNC_ENABLED, e o acoplamento anterior era um
+    // erro: a instância de reserva desliga a sincronização (os dois
+    // clientes dela apontam para o mesmo Neon, então sincronizar consigo
+    // mesma só fabricava conflito), e junto ia a única poda que roda
+    // quando o notebook passa dias desligado.
     if (!this.config.sync.retentionEnabled) {
       this.logger.warn('Poda de retenção desabilitada (SYNC_RETENTION_ENABLED=false).');
       return;
