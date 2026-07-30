@@ -13,6 +13,7 @@ import type {
   ConflictResolution,
   DatabaseNode,
   SyncDirection,
+  SyncPhase,
   SyncRunStatus,
   SyncTrigger,
 } from '../enums/sync.js';
@@ -127,4 +128,46 @@ export interface SyncStatusResponse {
   unresolvedConflicts: number;
   lastRun: SyncRunSummary | null;
   nextScheduledRun: string | null;
+}
+
+/**
+ * Progresso ao vivo da sincronização servidor↔servidor.
+ *
+ * O `SyncStatusResponse` acima só conta a história DEPOIS: ele lê o
+ * último `SyncRun`, que só existe quando a execução terminou. Isto aqui
+ * é o que permite acompanhar enquanto acontece — quanto falta, o que
+ * está sendo aplicado agora e o que ainda está na fila.
+ */
+export interface SyncProgressResponse {
+  running: boolean;
+  phase: SyncPhase;
+  direction: SyncDirection | null;
+  startedAt: string | null;
+  /** Entradas a aplicar nesta execução, medidas antes de começar. */
+  total: number;
+  processed: number;
+  /** 0–100. Vale 100 quando não há nada a fazer — nada pendente é 100% em dia. */
+  percent: number;
+  /** Entidade sendo aplicada neste instante. */
+  currentEntity: string | null;
+  applied: number;
+  conflicts: number;
+  failed: number;
+  /**
+   * O que ainda não foi aplicado, por entidade e por sentido.
+   *
+   * Continua respondendo com a sincronização parada: é a resposta para
+   * "o que ainda vai ser baixado" antes de qualquer execução começar.
+   */
+  pending: SyncPendingByEntity[];
+  /** Preenchido quando um dos bancos não pôde ser consultado. */
+  unavailable: DatabaseNode[];
+}
+
+export interface SyncPendingByEntity {
+  entity: string;
+  /** Entradas esperando para subir ao Neon. */
+  toCloud: number;
+  /** Entradas esperando para descer ao local. */
+  toLocal: number;
 }

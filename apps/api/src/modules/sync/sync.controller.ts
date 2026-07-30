@@ -24,6 +24,7 @@ import {
   PERMISSIONS,
   type AuthenticatedUser,
   type SyncPullResponse,
+  type SyncProgressResponse,
   type SyncPushResponse,
   type SyncRunSummary,
   type SyncStatusResponse,
@@ -46,6 +47,18 @@ export class SyncController {
   @ApiOperation({ summary: 'Estado atual da sincronização' })
   async status(): Promise<SyncStatusResponse> {
     return this.syncService.getStatus();
+  }
+
+  /**
+   * Progresso ao vivo. Feito para ser consultado de segundo em segundo
+   * pela tela de sincronização, então não passa pelo throttler de `sync`
+   * (que existe para as cargas grandes de push/pull, não para leitura).
+   */
+  @Get('progress')
+  @RequirePermissions(PERMISSIONS.SYNC_READ)
+  @ApiOperation({ summary: 'Progresso ao vivo da sincronização' })
+  async progress(): Promise<SyncProgressResponse> {
+    return this.syncService.getProgress();
   }
 
   @Post('trigger')
