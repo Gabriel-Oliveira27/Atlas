@@ -116,9 +116,17 @@ senha caractere a caractere.
    DATABASE_URL_LOCAL    ← o mesmo valor do Neon; esta instância não tem banco local
    JWT_ACCESS_SECRET     ← OS MESMOS do notebook (ver abaixo)
    JWT_REFRESH_SECRET    ← idem
-   REDIS_URL             ← Upstash, plano gratuito
+   REDIS_URL             ← OPCIONAL, pode deixar em branco (ver abaixo)
    DOCS_USER / DOCS_PASSWORD
    ```
+
+> **`REDIS_URL` virou opcional.** Sem Redis o rate limit cai para um
+> contador em memória do processo, e nada mais é perdido — não há fila
+> BullMQ no projeto. Até 30/07/2026 um Redis inalcançável era pior que
+> não ter: o comando ficava pendurado, e como o rate limit roda em TODA
+> requisição, o health check nunca respondia e o deploy morria em
+> "service unhealthy" com a API no ar e muda. Corrigido; hoje um Redis
+> ausente degrada em vez de travar.
 
 > **Os segredos JWT precisam ser IGUAIS nas duas instâncias.** É o que
 > permite um token emitido pelo notebook continuar valendo na reserva.
@@ -127,7 +135,35 @@ senha caractere a caractere.
 
 3. Anote a URL (`https://atlas-api-reserva.onrender.com`).
 
-### Limite do plano gratuito
+### Alternativa: a mesma API na Vercel
+
+O `apps/api/vercel.json` publica a API como função serverless, num
+projeto Vercel **separado** do web (Root Directory apontando para
+`apps/api`; os dois arquivos `vercel.json` não se atrapalham porque a
+Vercel lê só o do diretório configurado).
+
+A vantagem sobre o Render gratuito é direta: **não hiberna**. Some o
+cold start de 50 s que faz o app desistir da reserva.
+
+O que essa instância **não** faz, por ser serverless:
+
+|                                     | Render         | Vercel       |
+| ----------------------------------- | -------------- | ------------ |
+| Atende HTTP                         | sim            | sim          |
+| Hiberna                             | ~15 min → 50 s | não          |
+| Cron de sincronização (03:00/18:00) | roda           | **não roda** |
+| Poda de retenção                    | roda           | **não roda** |
+
+Uma função acorda, responde e congela — não existe processo para segurar
+um agendamento. Por isso o perfil da Vercel nasce com `SYNC_ENABLED=false`
+e `SYNC_RETENTION_ENABLED=false`: ela é uma boca de HTTP sobre o Neon.
+Quem sincroniza e poda é o notebook, que tem os dois bancos e um processo
+de verdade.
+
+Variáveis: as mesmas do Render, mais as duas acima. Os segredos JWT
+seguem tendo que ser idênticos aos do notebook.
+
+### Limite do plano gratuito do Render
 
 O serviço hiberna após ~15 min sem tráfego e leva uns 50 s para acordar.
 Para uma reserva é aceitável. Se incomodar, um cron simples chamando
