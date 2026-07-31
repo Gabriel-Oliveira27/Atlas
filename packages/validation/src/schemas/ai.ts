@@ -165,3 +165,32 @@ export const exerciseAdaptationPayloadSchema = z.object({
   seekProfessional: z.boolean(),
 });
 export type ExerciseAdaptationPayload = z.infer<typeof exerciseAdaptationPayloadSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Envio de notificação por automação
+//
+// O formato vem do workflow `03-analise-hidratacao`, que já monta
+// { userId, type, title, body }. Mudar um nome aqui quebra o workflow em
+// silêncio, no horário agendado, sem ninguém olhando.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Espelha o enum `NotificationType` do Prisma — divergir aqui passaria
+ * na validação e quebraria no INSERT. */
+export const notificationTypeSchema = z.enum([
+  'HYDRATION_REMINDER',
+  'WORKOUT_REMINDER',
+  'WEEKLY_REPORT',
+  'ASSESSMENT_DUE',
+  'ANNOUNCEMENT',
+  'SYSTEM',
+]);
+
+export const sendNotificationSchema = z.object({
+  userId: cuidSchema,
+  type: notificationTypeSchema,
+  title: z.string().trim().min(1).max(120),
+  body: z.string().trim().min(1).max(500),
+  /** Payload de navegação, ex.: { screen: "hydration" }. */
+  data: z.record(z.unknown()).optional(),
+});
+export type SendNotificationInput = z.infer<typeof sendNotificationSchema>;
