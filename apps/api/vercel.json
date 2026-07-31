@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+
+  "//": "Projeto Vercel SEPARADO do web, com Root Directory apontando para apps/api. O vercel.json da raiz publica o apps/web; os dois não se atrapalham porque a Vercel lê apenas o arquivo do Root Directory configurado.",
+
+  "//install": "Os comandos sobem para a raiz porque o workspace pnpm vive lá: instalar de dentro de apps/api não enxergaria os pacotes @atlas/*. O filtro '@atlas/api...' constrói as dependências na ordem certa antes da API.",
+  "installCommand": "cd ../.. && corepack pnpm install --frozen-lockfile --prod=false",
+  "buildCommand": "cd ../.. && corepack pnpm --filter @atlas/database generate:ci && corepack pnpm --filter \"@atlas/api...\" build",
+
+  "//rotas": "Tudo cai na mesma função: quem roteia é o Nest, igual a quando escuta uma porta. Sem isto, a Vercel procuraria um arquivo por caminho e devolveria 404 em tudo que não fosse /api.",
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
+
+  "functions": {
+    "api/index.js": {
+      "//": "30 s cobre o pior caso de cold start com o Nest subindo inteiro. O padrão do plano gratuito (10 s) derruba justamente a primeira requisição depois de um período parado — que é quando esta instância costuma ser chamada.",
+      "maxDuration": 30
+    }
+  }
+}

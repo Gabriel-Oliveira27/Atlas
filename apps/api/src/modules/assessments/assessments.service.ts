@@ -10,7 +10,6 @@ import { Injectable } from '@nestjs/common';
 import {
   AppError,
   CHANGE_OPERATION,
-  DATABASE_NODE,
   buildPaginationMeta,
   calculateBmi,
   calculateBodyFatNavy,
@@ -117,7 +116,7 @@ export class AssessmentsService {
           payload: assessment as never,
           version: assessment.version,
           originNode: this.config.nodeId,
-          targetNode: DATABASE_NODE.CLOUD,
+          targetNode: this.prisma.replicationTarget,
         },
       });
 

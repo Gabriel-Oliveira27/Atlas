@@ -8,13 +8,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import {
-  AppError,
-  CHANGE_OPERATION,
-  DATABASE_NODE,
-  toDayKey,
-  type PaginatedResult,
-} from '@atlas/shared';
+import { AppError, CHANGE_OPERATION, toDayKey, type PaginatedResult } from '@atlas/shared';
 import { buildPaginationMeta, normalizePagination } from '@atlas/shared';
 import type {
   HydrationHistoryQuery,
@@ -78,7 +72,7 @@ export class HydrationService {
           payload: log as never,
           version: log.version,
           originNode: this.config.nodeId,
-          targetNode: DATABASE_NODE.CLOUD,
+          targetNode: this.prisma.replicationTarget,
         },
       });
 
@@ -201,7 +195,7 @@ export class HydrationService {
           payload: { id: logId } as never,
           version: deleted.version,
           originNode: this.config.nodeId,
-          targetNode: DATABASE_NODE.CLOUD,
+          targetNode: this.prisma.replicationTarget,
         },
       });
 

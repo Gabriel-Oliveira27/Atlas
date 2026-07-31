@@ -135,6 +135,29 @@ export class PrismaService implements OnModuleInit, OnApplicationShutdown {
   }
 
   /**
+   * Para onde uma escrita feita AGORA precisa ser propagada.
+   *
+   * É sempre o nó que não está atendendo: a alteração já está no banco
+   * ativo, e o outbox existe justamente para levá-la ao outro.
+   *
+   * Todos os serviços gravavam `targetNode: CLOUD` fixo. Era verdade
+   * enquanto o local era o principal e toda escrita nascia nele. Com o
+   * Neon principal (ADR 008) virou mentira: a escrita cai no Neon e a
+   * entrada do outbox diz "propagar para o Neon" — o banco onde a linha
+   * JÁ ESTÁ. O `applyPending` filtra por `targetNode`, então nada nunca
+   * casava e a sincronização parava por inteiro, em silêncio, com o
+   * ChangeLog crescendo sem nunca ser aplicado.
+   *
+   * Sem nó ativo não existe escrita acontecendo (o `getClient` lança
+   * antes), então o valor devolvido nesse caso não chega a ser usado.
+   */
+  get replicationTarget(): DatabaseNode {
+    return this.router.getActiveNode() === DATABASE_NODE.CLOUD
+      ? DATABASE_NODE.LOCAL
+      : DATABASE_NODE.CLOUD;
+  }
+
+  /**
    * Cliente do banco principal, para escrita de controle da própria
    * sincronização (SyncRun, contadores). Difere de `db`: `db` cai para o
    * secundário em contingência, este devolve `null` quando o principal

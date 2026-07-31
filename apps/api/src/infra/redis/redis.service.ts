@@ -11,6 +11,12 @@ export class RedisService implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(RedisService.name);
   readonly client: Redis;
 
+  /** Depois disto o cliente para de tentar reconectar. Ver `retryStrategy`. */
+  private static readonly MAX_TENTATIVAS = 5;
+
+  /** Evita repetir o mesmo erro de conexão a cada tentativa. */
+  private jaLogouErro = false;
+
   constructor(private readonly config: EnvConfig) {
     this.client = new Redis(this.config.redis.url, {
       keyPrefix: `${this.config.redis.prefix}:`,
@@ -42,11 +48,42 @@ export class RedisService implements OnModuleInit, OnApplicationShutdown {
 
       enableReadyCheck: true,
       lazyConnect: true,
-      retryStrategy: (attempt) => Math.min(attempt * 200, 5_000),
+
+      /**
+       * Desiste depois de algumas tentativas em vez de reconectar para
+       * sempre.
+       *
+       * Sem Redis configurado — o caso normal na hospedagem gratuita — a
+       * reconexão infinita gerava um ECONNREFUSED a cada ~3 s, para
+       * sempre. Foram 51 erros em 2 minutos de log no Render: come a cota
+       * de log, e o que é pior, esconde erro de verdade no meio.
+       *
+       * Devolver `null` faz o ioredis parar de tentar. Nada se perde: o
+       * rate limit já cai para o contador em memória, e não há fila
+       * BullMQ no projeto. Um Redis que volte depois disso exige um
+       * restart do serviço — aceitável para uma dependência opcional.
+       */
+      retryStrategy: (attempt) => {
+        if (attempt > RedisService.MAX_TENTATIVAS) return null;
+        return Math.min(attempt * 200, 5_000);
+      },
     });
 
     this.client.on('error', (error) => {
-      this.logger.error({ err: error }, 'Erro na conexão com o Redis');
+      // Só o primeiro erro vira log. Os seguintes são o mesmo erro
+      // repetido pela reconexão, e repetir não acrescenta informação.
+      if (this.jaLogouErro) return;
+      this.jaLogouErro = true;
+
+      this.logger.error(
+        { err: error },
+        'Erro na conexão com o Redis — erros seguintes serão omitidos até reconectar.',
+      );
+    });
+
+    // Reconectou: volta a valer a pena avisar se cair de novo.
+    this.client.on('ready', () => {
+      this.jaLogouErro = false;
     });
   }
 

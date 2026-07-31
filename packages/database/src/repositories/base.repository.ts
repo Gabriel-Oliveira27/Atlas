@@ -159,7 +159,20 @@ export abstract class BaseRepository<TModel extends { id: string; version: numbe
   }
 }
 
-/** Opções padrão para repositórios que rodam no nó local. */
+/**
+ * Opções padrão para repositórios que rodam no nó local.
+ *
+ * ATENÇÃO ao `targetNode`: o valor abaixo só vale para quem escreve no
+ * banco LOCAL. `targetNode` é "para onde propagar", ou seja, o banco em
+ * que a alteração AINDA NÃO está — fixá-lo em CLOUD numa escrita que já
+ * caiu no Neon faz a entrada apontar para o banco onde ela mesma está, e
+ * o `applyPending` nunca a encontra. Foi esse engano nos serviços que
+ * parou a sincronização por inteiro depois do ADR 008.
+ *
+ * Quem estiver dentro da API deve usar `PrismaService.replicationTarget`,
+ * que resolve isso a partir do nó ativo. Este atalho existe para uso
+ * fora dela (scripts, seed), onde a escrita é sabidamente local.
+ */
 export function defaultRepositoryOptions(nodeId: string): BaseRepositoryOptions {
   return {
     nodeId,

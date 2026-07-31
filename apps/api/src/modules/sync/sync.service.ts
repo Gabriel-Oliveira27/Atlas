@@ -29,9 +29,14 @@ import {
   CONFLICT_RESOLUTION,
   DATABASE_NODE,
   SYNC_DIRECTION,
+  SYNC_PHASE,
   SYNC_RUN_STATUS,
   SYNC_TRIGGER,
+  type DatabaseNode,
   type SyncDirection,
+  type SyncPendingByEntity,
+  type SyncPhase,
+  type SyncProgressResponse,
   type SyncRunSummary,
   type SyncStatusResponse,
   type SyncTrigger,
@@ -58,6 +63,30 @@ export class SyncService {
    * outbox duas vezes e poderiam gerar conflitos artificiais.
    */
   private running = false;
+
+  /**
+   * Progresso da execução em curso.
+   *
+   * Em memória de propósito: é estado efêmero de UMA execução, lido de
+   * segundo em segundo por uma tela. Gravar isso no banco a cada entrada
+   * aplicada dobraria as escritas da sincronização para alimentar um
+   * indicador. Some num restart, e é aceitável — a execução some junto.
+   */
+  private progress: LiveProgress = SyncService.idleProgress();
+
+  private static idleProgress(): LiveProgress {
+    return {
+      phase: SYNC_PHASE.IDLE,
+      direction: null,
+      startedAt: null,
+      total: 0,
+      processed: 0,
+      currentEntity: null,
+      applied: 0,
+      conflicts: 0,
+      failed: 0,
+    };
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -137,8 +166,18 @@ export class SyncService {
     let conflicts = 0;
     let failed = 0;
 
+    // Mede o tamanho do trabalho ANTES de começar: sem isso não existe
+    // denominador, e "processadas 40" não diz se falta muito ou pouco.
+    this.progress = {
+      ...SyncService.idleProgress(),
+      direction,
+      startedAt: new Date().toISOString(),
+      total: await this.countWorkAhead(local, cloud, direction),
+    };
+
     try {
       if (direction !== SYNC_DIRECTION.CLOUD_TO_LOCAL) {
+        this.progress.phase = SYNC_PHASE.PUSH;
         const result = await this.applyPending(local, cloud, run.id, DATABASE_NODE.CLOUD);
         pushed = result.applied;
         conflicts += result.conflicts;
@@ -146,6 +185,7 @@ export class SyncService {
       }
 
       if (direction !== SYNC_DIRECTION.LOCAL_TO_CLOUD) {
+        this.progress.phase = SYNC_PHASE.PULL;
         const result = await this.applyPending(cloud, local, run.id, DATABASE_NODE.LOCAL);
         pulled = result.applied;
         conflicts += result.conflicts;
@@ -192,6 +232,8 @@ export class SyncService {
       return this.toSummary(failedRun);
     } finally {
       this.running = false;
+      this.progress.phase = SYNC_PHASE.IDLE;
+      this.progress.currentEntity = null;
     }
   }
 
@@ -217,6 +259,7 @@ export class SyncService {
     // Percorre na ordem de dependência: um WorkoutDay não pode ser
     // inserido antes do WorkoutPlan que ele referencia.
     for (const entityName of orderedEntities) {
+      this.progress.currentEntity = entityName;
       let hasMore = true;
 
       while (hasMore) {
@@ -242,6 +285,10 @@ export class SyncService {
             if (outcome === 'conflict') conflicts += 1;
             else applied += 1;
 
+            this.progress.processed += 1;
+            if (outcome === 'conflict') this.progress.conflicts += 1;
+            else this.progress.applied += 1;
+
             await source.changeLog.update({
               where: { id: change.id },
               data: {
@@ -252,6 +299,8 @@ export class SyncService {
             });
           } catch (error) {
             failed += 1;
+            this.progress.processed += 1;
+            this.progress.failed += 1;
             const message = error instanceof Error ? error.message : String(error);
 
             const attempts = change.attempts + 1;
@@ -378,6 +427,134 @@ export class SyncService {
     });
   }
 
+  /**
+   * Quantas entradas esta execução vai aplicar.
+   *
+   * Contado antes de começar, e só do que o `applyPending` de fato lê:
+   * mesmo filtro (`PENDING` + `targetNode`), senão o denominador não
+   * bate com o numerador e a porcentagem passa de 100 ou trava em 80.
+   */
+  private async countWorkAhead(
+    local: PrismaClient,
+    cloud: PrismaClient,
+    direction: SyncDirection,
+  ): Promise<number> {
+    const contagens: Array<Promise<number>> = [];
+
+    if (direction !== SYNC_DIRECTION.CLOUD_TO_LOCAL) {
+      contagens.push(
+        local.changeLog.count({
+          where: { status: CHANGE_STATUS.PENDING, targetNode: DATABASE_NODE.CLOUD },
+        }),
+      );
+    }
+
+    if (direction !== SYNC_DIRECTION.LOCAL_TO_CLOUD) {
+      contagens.push(
+        cloud.changeLog.count({
+          where: { status: CHANGE_STATUS.PENDING, targetNode: DATABASE_NODE.LOCAL },
+        }),
+      );
+    }
+
+    const totais = await Promise.all(contagens);
+    return totais.reduce((soma, n) => soma + n, 0);
+  }
+
+  /**
+   * Progresso ao vivo — o que a tela de sincronização consome.
+   *
+   * A parte em memória responde "onde estamos agora"; a consulta ao
+   * `ChangeLog` responde "o que ainda falta", que precisa valer TAMBÉM
+   * com a sincronização parada. É essa segunda metade que diz o que
+   * ainda vai ser baixado antes de qualquer execução começar.
+   *
+   * Um banco fora do ar não derruba a resposta: ele entra em
+   * `unavailable` e a tela mostra o que dá para saber. Justamente quando
+   * o notebook acabou de ligar, o outro lado pode ainda não responder.
+   */
+  async getProgress(): Promise<SyncProgressResponse> {
+    const health = this.prisma.getHealth();
+    const unavailable: DatabaseNode[] = [];
+
+    const porEntidade = new Map<string, SyncPendingByEntity>();
+
+    const acumular = async (
+      client: PrismaClient | null,
+      disponivel: boolean,
+      node: DatabaseNode,
+      alvo: DatabaseNode,
+      campo: 'toCloud' | 'toLocal',
+    ): Promise<void> => {
+      if (!client || !disponivel) {
+        unavailable.push(node);
+        return;
+      }
+
+      try {
+        const grupos = await client.changeLog.groupBy({
+          by: ['entity'],
+          where: { status: CHANGE_STATUS.PENDING, targetNode: alvo },
+          _count: { _all: true },
+        });
+
+        for (const grupo of grupos) {
+          const atual = porEntidade.get(grupo.entity) ?? {
+            entity: grupo.entity,
+            toCloud: 0,
+            toLocal: 0,
+          };
+          atual[campo] = grupo._count._all;
+          porEntidade.set(grupo.entity, atual);
+        }
+      } catch {
+        // Contagem é informação de tela; um banco que recusa a consulta
+        // não pode transformar isso num erro para o operador.
+        unavailable.push(node);
+      }
+    };
+
+    await Promise.all([
+      acumular(
+        this.prisma.local,
+        health.local.available,
+        DATABASE_NODE.LOCAL,
+        DATABASE_NODE.CLOUD,
+        'toCloud',
+      ),
+      acumular(
+        this.prisma.cloud,
+        health.cloud?.available ?? false,
+        DATABASE_NODE.CLOUD,
+        DATABASE_NODE.LOCAL,
+        'toLocal',
+      ),
+    ]);
+
+    const pending = [...porEntidade.values()].sort((a, b) => a.entity.localeCompare(b.entity));
+
+    return {
+      running: this.running,
+      phase: this.progress.phase,
+      direction: this.progress.direction,
+      startedAt: this.progress.startedAt,
+      total: this.progress.total,
+      processed: this.progress.processed,
+      // Nada a fazer é 100% em dia, não 0% feito — a divisão por zero
+      // aqui é a diferença entre "tudo certo" e uma barra vazia parada.
+      percent:
+        this.progress.total === 0
+          ? 100
+          : Math.min(100, Math.round((this.progress.processed / this.progress.total) * 100)),
+      currentEntity: this.progress.currentEntity,
+      applied: this.progress.applied,
+      conflicts: this.progress.conflicts,
+      failed: this.progress.failed,
+      pending,
+      unavailable,
+    };
+  }
+
   /** Estado atual da sincronização — alimenta o painel de administração. */
   async getStatus(): Promise<SyncStatusResponse> {
     const health = this.prisma.getHealth();
@@ -430,6 +607,19 @@ export class SyncService {
       errorMessage: run.errorMessage,
     };
   }
+}
+
+/** Progresso mantido em memória durante a execução. */
+interface LiveProgress {
+  phase: SyncPhase;
+  direction: SyncDirection | null;
+  startedAt: string | null;
+  total: number;
+  processed: number;
+  currentEntity: string | null;
+  applied: number;
+  conflicts: number;
+  failed: number;
 }
 
 /** Superfície mínima do delegate do Prisma usada pelo motor genérico. */

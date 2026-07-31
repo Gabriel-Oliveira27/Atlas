@@ -45,6 +45,16 @@ export const SYNC_TRIGGER = {
 } as const;
 export type SyncTrigger = (typeof SYNC_TRIGGER)[keyof typeof SYNC_TRIGGER];
 
+/** Em que ponto da execução a sincronização está — alimenta a tela de progresso. */
+export const SYNC_PHASE = {
+  IDLE: 'IDLE',
+  /** Aplicando no Neon o que nasceu no local. */
+  PUSH: 'PUSH',
+  /** Aplicando no local o que nasceu no Neon. */
+  PULL: 'PULL',
+} as const;
+export type SyncPhase = (typeof SYNC_PHASE)[keyof typeof SYNC_PHASE];
+
 export const SYNC_DIRECTION = {
   LOCAL_TO_CLOUD: 'LOCAL_TO_CLOUD',
   CLOUD_TO_LOCAL: 'CLOUD_TO_LOCAL',
