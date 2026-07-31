@@ -208,6 +208,8 @@ enum AiTaskType {
   HYDRATION_ANALYSIS
   PROGRESS_ANALYSIS
   EXERCISE_DESCRIPTION
+  /// Substituir um exercício que o aluno não consegue executar agora.
+  EXERCISE_ADAPTATION
 }
 
 enum NotificationType {

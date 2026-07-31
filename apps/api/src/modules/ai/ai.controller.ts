@@ -2,13 +2,27 @@
  * Rotas de IA e o webhook de retorno do N8N.
  */
 
-import { Body, Controller, Get, Headers, Post, Query, RawBodyRequest, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Query,
+  RawBodyRequest,
+  Req,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyRequest } from 'fastify';
 import { verifyWebhookSignature } from '@atlas/auth';
 import {
+  adaptExerciseSchema,
   paginationSchema,
   weeklyReportCallbackSchema,
+  type AdaptExerciseInput,
+  type ExerciseAdaptationPayload,
   type PaginationInput,
   type WeeklyReportCallbackInput,
 } from '@atlas/validation';
@@ -56,6 +70,25 @@ export class AiController {
   @ApiOperation({ summary: 'Gera o relatório semanal sob demanda' })
   async generate(@CurrentUser() user: AuthenticatedUser) {
     return this.aiService.generateWeeklyReport(user.id);
+  }
+
+  /**
+   * Adapta um exercício que o aluno não consegue executar agora.
+   *
+   * Sob demanda e síncrona — o aluno está de pé na academia, entre
+   * séries. Fica na família de throttle da IA (5/hora) porque cada
+   * chamada custa dinheiro real ao provedor; adaptar é excepcional, não
+   * é navegação.
+   */
+  @Post('exercises/adapt')
+  @HttpCode(HttpStatus.OK)
+  @ThrottleFamily('ai')
+  @ApiOperation({ summary: 'Sugere alternativas para um exercício' })
+  async adaptExercise(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(zodBody(adaptExerciseSchema)) body: AdaptExerciseInput,
+  ): Promise<ExerciseAdaptationPayload> {
+    return this.aiService.adaptExercise(user.id, body);
   }
 
   /**

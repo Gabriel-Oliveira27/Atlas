@@ -17,6 +17,7 @@ export const aiTaskSchema = z.enum([
   'HYDRATION_ANALYSIS',
   'PROGRESS_ANALYSIS',
   'EXERCISE_DESCRIPTION',
+  'EXERCISE_ADAPTATION',
 ]);
 export type AiTask = z.infer<typeof aiTaskSchema>;
 
@@ -89,3 +90,107 @@ export const weeklyReportCallbackSchema = z.object({
   errorMessage: z.string().max(2000).optional(),
 });
 export type WeeklyReportCallbackInput = z.infer<typeof weeklyReportCallbackSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Agente de adaptação de exercício
+//
+// O aluno está NA academia e não consegue executar o que o treino pede.
+// A entrada é curta de propósito: quem está entre séries não preenche
+// formulário. O resto do contexto (catálogo da unidade, limitações,
+// prescrição) a API busca sozinha — pedir isso ao cliente seria confiar
+// nele para dizer quais exercícios existem.
+// ─────────────────────────────────────────────────────────────────────
+
+export const exerciseAdaptationReasonSchema = z.enum([
+  'EQUIPMENT_BUSY',
+  'EQUIPMENT_MISSING',
+  'PAIN_OR_DISCOMFORT',
+  'TECHNIQUE_UNSURE',
+  'WANTS_VARIATION',
+]);
+export type ExerciseAdaptationReason = z.infer<typeof exerciseAdaptationReasonSchema>;
+
+export const adaptExerciseSchema = z.object({
+  /** Exercício do treino que precisa ser substituído. */
+  exerciseId: cuidSchema,
+  reason: exerciseAdaptationReasonSchema,
+  /** Relato livre do aluno. Curto: é digitado de pé, no celular. */
+  reasonDetail: z.string().trim().max(280).optional(),
+  /**
+   * Sessão em andamento, quando houver. Serve para a adaptação ficar
+   * registrada junto do treino que estava sendo feito.
+   */
+  workoutLogId: cuidSchema.optional(),
+  /**
+   * Prescrição do exercício que está sendo trocado.
+   *
+   * Vem do cliente porque ele já a tem na tela — o aluno está olhando
+   * "4 x 8-12" neste instante. Buscá-la no banco exigiria descobrir em
+   * qual dia de qual plano aquele exercício aparece, um caminho frágil
+   * para um dado que está à mão. E não é fronteira de segurança: errar
+   * aqui só piora a própria sugestão de quem errou.
+   *
+   * O catálogo, esse sim, a API monta sozinha — nele confiar no cliente
+   * seria deixá-lo dizer quais exercícios existem.
+   */
+  sets: z.number().int().min(1).max(20).default(3),
+  reps: z.string().trim().min(1).max(20).default('8-12'),
+});
+export type AdaptExerciseInput = z.infer<typeof adaptExerciseSchema>;
+
+/**
+ * Saída do modelo, validada antes de chegar ao aplicativo.
+ *
+ * Sem esta validação, uma resposta fora do formato quebraria a tela sem
+ * dizer por quê — o mesmo motivo pelo qual o relatório semanal valida a
+ * dele (ADR 005).
+ */
+export const exerciseAdaptationPayloadSchema = z.object({
+  alternatives: z
+    .array(
+      z.object({
+        exerciseId: cuidSchema,
+        sets: z.number().int().min(1).max(20),
+        reps: z.string().trim().min(1).max(20),
+        whyItWorks: z.string().trim().min(1).max(300),
+        executionCue: z.string().trim().max(300).optional(),
+        loadAdjustment: z.enum(['LIGHTER', 'SAME', 'HEAVIER']),
+      }),
+    )
+    // Zero alternativas é resposta válida: significa "pule este
+    // exercício", e nesse caso `skipRecommended` explica o porquê.
+    .max(3),
+  skipRecommended: z.boolean(),
+  skipRationale: z.string().trim().max(300).optional(),
+  seekProfessional: z.boolean(),
+});
+export type ExerciseAdaptationPayload = z.infer<typeof exerciseAdaptationPayloadSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Envio de notificação por automação
+//
+// O formato vem do workflow `03-analise-hidratacao`, que já monta
+// { userId, type, title, body }. Mudar um nome aqui quebra o workflow em
+// silêncio, no horário agendado, sem ninguém olhando.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Espelha o enum `NotificationType` do Prisma — divergir aqui passaria
+ * na validação e quebraria no INSERT. */
+export const notificationTypeSchema = z.enum([
+  'HYDRATION_REMINDER',
+  'WORKOUT_REMINDER',
+  'WEEKLY_REPORT',
+  'ASSESSMENT_DUE',
+  'ANNOUNCEMENT',
+  'SYSTEM',
+]);
+
+export const sendNotificationSchema = z.object({
+  userId: cuidSchema,
+  type: notificationTypeSchema,
+  title: z.string().trim().min(1).max(120),
+  body: z.string().trim().min(1).max(500),
+  /** Payload de navegação, ex.: { screen: "hydration" }. */
+  data: z.record(z.unknown()).optional(),
+});
+export type SendNotificationInput = z.infer<typeof sendNotificationSchema>;

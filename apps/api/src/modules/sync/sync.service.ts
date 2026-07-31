@@ -280,7 +280,7 @@ export class SyncService {
 
         for (const change of pending) {
           try {
-            const outcome = await this.applyChange(target, change);
+            const outcome = await this.applyChange(source, target, change);
 
             if (outcome === 'conflict') conflicts += 1;
             else applied += 1;
@@ -338,6 +338,7 @@ export class SyncService {
    * Devolve 'applied' ou 'conflict'.
    */
   private async applyChange(
+    source: PrismaClient,
     target: PrismaClient,
     change: {
       id: string;
@@ -374,7 +375,33 @@ export class SyncService {
         return 'applied';
       }
 
-      await delegate.create({ data: { ...payload, id: change.entityId } });
+      /**
+       * O payload NÃO serve para criar.
+       *
+       * Numa entrada de UPDATE ele guarda só os campos alterados. Criar
+       * a partir dele produz uma linha incompleta — e o Prisma recusa
+       * antes disso, com "Argument `email` is missing".
+       *
+       * Era um travamento permanente: a entrada voltava para a fila,
+       * falhava igual na execução seguinte, e todo registro que
+       * dependesse dela caía junto por chave estrangeira
+       * ("workout_logs_userId_fkey"). Foi o que segurou 21 alterações e
+       * deixou o Neon com um usuário a menos que o local.
+       *
+       * A linha completa está na ORIGEM: é de lá que ela vem.
+       */
+      const completo = (await this.readFromSource(source, definition, change.entityId)) as Record<
+        string,
+        unknown
+      > | null;
+
+      if (!completo) {
+        // Sumiu da origem entre a escrita e a sincronização (exclusão
+        // física, ou banco recriado). Não há o que propagar.
+        return 'applied';
+      }
+
+      await delegate.create({ data: completo });
       return 'applied';
     }
 
@@ -405,6 +432,28 @@ export class SyncService {
     // Alteração mais antiga que o destino: descartada (o destino já
     // tem uma versão mais nova). Não é erro.
     return 'applied';
+  }
+
+  /**
+   * Lê a linha inteira na origem, para criá-la no destino.
+   *
+   * `findUnique` sem `include` devolve só os campos escalares — que é
+   * exatamente o que o `create` do destino aceita. Trazer relações aqui
+   * quebraria o insert, e não é preciso: cada entidade relacionada tem a
+   * própria entrada no outbox e a própria vez na ordem de aplicação.
+   */
+  private async readFromSource(
+    source: PrismaClient,
+    definition: { delegate: keyof PrismaClient },
+    entityId: string,
+  ): Promise<unknown> {
+    const delegate = (source as unknown as Record<string, DelegateLike>)[
+      definition.delegate as string
+    ];
+
+    if (!delegate) return null;
+
+    return delegate.findUnique({ where: { id: entityId } });
   }
 
   private async recordConflict(

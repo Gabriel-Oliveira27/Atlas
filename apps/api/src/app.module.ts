@@ -25,6 +25,7 @@ import { HealthModule } from './modules/health/health.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { ExercisesModule } from './modules/exercises/exercises.module.js';
 import { WorkoutsModule } from './modules/workouts/workouts.module.js';
+import { AdminModule } from './modules/admin/admin.module.js';
 import { HydrationModule } from './modules/hydration/hydration.module.js';
 import { AssessmentsModule } from './modules/assessments/assessments.module.js';
 import { SyncModule } from './modules/sync/sync.module.js';
@@ -98,6 +99,7 @@ const config = new EnvConfig();
     UsersModule,
     ExercisesModule,
     WorkoutsModule,
+    AdminModule,
     HydrationModule,
     AssessmentsModule,
     SyncModule,
