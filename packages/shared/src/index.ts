@@ -21,6 +21,7 @@ export * from './types/auth.js';
 export * from './types/sync.js';
 export * from './types/pagination.js';
 
+export * from './utils/api-url.js';
 export * from './utils/date.js';
 export * from './utils/health.js';
 export * from './utils/identity.js';

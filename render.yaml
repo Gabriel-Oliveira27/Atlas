@@ -175,3 +175,34 @@ services:
         sync: false
       - key: DOCS_PASSWORD
         sync: false
+
+      # ── Google OAuth ────────────────────────────────────────────────
+      # Sem estas, a API sobe avisando "Google OAuth não configurado" e
+      # /auth/google devolve 404 — era por isso que o login com Google
+      # não funcionava aqui, embora funcionasse no notebook.
+      #
+      # O GOOGLE_CALLBACK_URL precisa apontar para ESTA instância e estar
+      # cadastrado em "Authorized redirect URIs" no console do Google.
+      # Cada endereço que atende OAuth precisa do seu: o do túnel do
+      # notebook não vale para cá.
+      #
+      #   https://atlas-api-reserva.onrender.com/api/auth/google/callback
+      #
+      # Deixe as três em branco se não for usar o login com Google — a
+      # API sobe igual, só sem essa rota.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CALLBACK_URL
+        sync: false
+
+      # Para onde o usuário volta depois do OAuth. Sem elas, o redirect
+      # cai no padrão localhost e o navegador do usuário não chega a
+      # lugar nenhum.
+      - key: OAUTH_SUCCESS_REDIRECT_WEB
+        value: https://atlas-academia.vercel.app/auth/callback
+      - key: OAUTH_SUCCESS_REDIRECT_MOBILE
+        value: atlasapp://auth/callback
+      - key: OAUTH_FAILURE_REDIRECT
+        value: https://atlas-academia.vercel.app/auth/error

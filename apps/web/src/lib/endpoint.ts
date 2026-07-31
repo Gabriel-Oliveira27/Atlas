@@ -26,8 +26,16 @@
  * interface em vez de silenciosa.
  */
 
-const PRIMARY = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3333/api';
-const FALLBACK = process.env.NEXT_PUBLIC_API_FALLBACK_URL ?? '';
+import { normalizeApiBaseUrl } from '@atlas/shared';
+
+/**
+ * Os dois endereços passam pela normalização porque configurar
+ * `https://servico.onrender.com` sem o `/api` é o erro natural — e o
+ * sintoma engana: a API responde 200 no health check o tempo todo, e só
+ * as chamadas de verdade tomam 404. Ver `normalizeApiBaseUrl`.
+ */
+const PRIMARY = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3333/api');
+const FALLBACK = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_FALLBACK_URL ?? '');
 
 /** Acima disto, considera-se que o primário não está no ar. */
 const PROBE_TIMEOUT_MS = 2_000;
