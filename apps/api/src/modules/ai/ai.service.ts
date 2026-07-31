@@ -15,6 +15,8 @@ import {
   BaseAiProvider,
   buildWeeklyReportMessages,
   createAiProvider,
+  EXERCISE_ADAPTATION_SYSTEM_PROMPT,
+  buildExerciseAdaptationMessages,
   WEEKLY_REPORT_SYSTEM_PROMPT,
   type AiFactoryConfig,
   type WeeklyReportContext,
@@ -30,7 +32,10 @@ import {
   type PaginatedResult,
 } from '@atlas/shared';
 import {
+  exerciseAdaptationPayloadSchema,
   weeklyReportPayloadSchema,
+  type AdaptExerciseInput,
+  type ExerciseAdaptationPayload,
   type PaginationInput,
   type WeeklyReportPayload,
 } from '@atlas/validation';
@@ -163,6 +168,204 @@ export class AiService {
         cause: error,
       });
     }
+  }
+
+  /**
+   * Adapta um exercício que o aluno não consegue executar agora.
+   *
+   * Síncrono e no caminho crítico: ele está de pé, entre séries. Por isso
+   * não passa pelo N8N — ver `infra/n8n/README.md`.
+   */
+  async adaptExercise(
+    userId: string,
+    input: AdaptExerciseInput,
+  ): Promise<ExerciseAdaptationPayload> {
+    if (!this.config.ai.enabled) {
+      throw new AppError(ERROR_CODES.AI_DISABLED, 'A camada de IA está desabilitada', {
+        status: 503,
+      });
+    }
+
+    const [usuario, original] = await Promise.all([
+      this.prisma.db.user.findUnique({
+        where: { id: userId },
+        select: { goal: true, experienceLevel: true },
+      }),
+      this.prisma.db.exercise.findFirst({
+        where: { id: input.exerciseId, deletedAt: null },
+        select: {
+          id: true,
+          name: true,
+          muscleGroupId: true,
+          muscleGroup: { select: { name: true } },
+          equipment: { select: { equipment: { select: { name: true } } } },
+        },
+      }),
+    ]);
+
+    if (!usuario) {
+      throw new AppError(ERROR_CODES.NOT_FOUND, 'Usuário não encontrado', { status: 404 });
+    }
+
+    if (!original) {
+      throw new AppError(ERROR_CODES.NOT_FOUND, 'Exercício não encontrado', { status: 404 });
+    }
+
+    const alternativas = await this.buildAdaptationCatalog(
+      userId,
+      original.muscleGroupId,
+      original.id,
+    );
+
+    if (alternativas.length === 0) {
+      // Sem catálogo não há o que sugerir, e gastar uma chamada ao modelo
+      // para ele responder "nenhuma" seria pagar por um "não" que já
+      // sabemos. Pular é a resposta honesta.
+      return {
+        alternatives: [],
+        skipRecommended: true,
+        skipRationale: 'Não há outro exercício cadastrado para este grupo muscular nesta academia.',
+        seekProfessional: false,
+      };
+    }
+
+    const provider = createAiProvider(this.factoryConfig);
+
+    const job = await this.prisma.db.aiJob.create({
+      data: {
+        userId,
+        task: 'EXERCISE_ADAPTATION',
+        status: 'RUNNING',
+        provider: provider.id.toUpperCase() as AiProviderName,
+        model: provider.model,
+        startedAt: new Date(),
+      },
+    });
+
+    try {
+      const response = await provider.complete({
+        system: EXERCISE_ADAPTATION_SYSTEM_PROMPT,
+        messages: buildExerciseAdaptationMessages({
+          original: {
+            id: original.id,
+            name: original.name,
+            muscleGroup: original.muscleGroup.name,
+            equipment: original.equipment.map((e) => e.equipment.name),
+            sets: input.sets,
+            reps: input.reps,
+          },
+          reason: input.reason,
+          ...(input.reasonDetail ? { reasonDetail: input.reasonDetail } : {}),
+          user: { goal: usuario.goal, experienceLevel: usuario.experienceLevel },
+          availableExercises: alternativas,
+        }),
+        responseFormat: 'json',
+        maxTokens: this.config.ai.maxTokens,
+        timeoutMs: this.config.ai.timeoutMs,
+      });
+
+      const raw = BaseAiProvider.extractJson(response.content);
+      const payload = exerciseAdaptationPayloadSchema.parse(raw);
+
+      // O modelo é instruído a usar só ids do catálogo, mas instrução não
+      // é garantia: um id inventado quebraria a tela do aluno com um
+      // exercício que não existe. Filtrar aqui é barato e definitivo.
+      const idsValidos = new Set(alternativas.map((e) => e.id));
+      const alternativasValidas = payload.alternatives.filter((a) => idsValidos.has(a.exerciseId));
+
+      if (alternativasValidas.length < payload.alternatives.length) {
+        this.logger.warn(
+          `Adaptação descartou ${payload.alternatives.length - alternativasValidas.length} ` +
+            'alternativa(s) com id fora do catálogo.',
+        );
+      }
+
+      await this.prisma.db.aiJob.update({
+        where: { id: job.id },
+        data: {
+          status: 'COMPLETED',
+          finishedAt: new Date(),
+          inputTokens: response.usage.inputTokens,
+          outputTokens: response.usage.outputTokens,
+          latencyMs: response.latencyMs,
+          response: response.content.slice(0, 10_000),
+        },
+      });
+
+      return {
+        ...payload,
+        alternatives: alternativasValidas,
+        // Sem alternativa válida sobrando, pular deixa de ser opção e
+        // passa a ser a resposta.
+        skipRecommended: payload.skipRecommended || alternativasValidas.length === 0,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      await this.prisma.db.aiJob.update({
+        where: { id: job.id },
+        data: {
+          status: 'FAILED',
+          finishedAt: new Date(),
+          errorMessage: message,
+          attempts: { increment: 1 },
+        },
+      });
+
+      this.logger.error({ err: error }, `Falha ao adaptar o exercício ${input.exerciseId}`);
+
+      throw new AppError(ERROR_CODES.AI_PROVIDER_ERROR, 'Não foi possível adaptar o exercício', {
+        status: 502,
+        cause: error,
+      });
+    }
+  }
+
+  /**
+   * Catálogo que a IA pode escolher: mesmo grupo muscular, disponível
+   * para este aluno.
+   *
+   * Recortado pelo grupo muscular de propósito. Mandar o catálogo inteiro
+   * encareceria a chamada e pioraria a resposta — o modelo escolheria
+   * entre centenas de itens quando a pergunta é "o que substitui ISTO".
+   *
+   * `gymId: null` são os exercícios globais; os demais só entram se o
+   * aluno for membro daquela academia. Sugerir equipamento de uma unidade
+   * onde ele não está é o mesmo que não responder.
+   */
+  private async buildAdaptationCatalog(
+    userId: string,
+    muscleGroupId: string,
+    excludeExerciseId: string,
+  ): Promise<Array<{ id: string; name: string; muscleGroup: string; equipment: string[] }>> {
+    const academias = await this.prisma.db.gymMembership.findMany({
+      where: { userId, deletedAt: null },
+      select: { gymId: true },
+    });
+
+    const exercicios = await this.prisma.db.exercise.findMany({
+      where: {
+        muscleGroupId,
+        isActive: true,
+        deletedAt: null,
+        id: { not: excludeExerciseId },
+        OR: [{ gymId: null }, { gymId: { in: academias.map((a) => a.gymId) } }],
+      },
+      select: {
+        id: true,
+        name: true,
+        muscleGroup: { select: { name: true } },
+        equipment: { select: { equipment: { select: { name: true } } } },
+      },
+      take: 60,
+    });
+
+    return exercicios.map((e) => ({
+      id: e.id,
+      name: e.name,
+      muscleGroup: e.muscleGroup.name,
+      equipment: e.equipment.map((x) => x.equipment.name),
+    }));
   }
 
   /** Reúne os dados da semana que alimentam o prompt. */

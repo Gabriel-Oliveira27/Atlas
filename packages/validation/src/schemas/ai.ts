@@ -121,6 +121,20 @@ export const adaptExerciseSchema = z.object({
    * registrada junto do treino que estava sendo feito.
    */
   workoutLogId: cuidSchema.optional(),
+  /**
+   * Prescrição do exercício que está sendo trocado.
+   *
+   * Vem do cliente porque ele já a tem na tela — o aluno está olhando
+   * "4 x 8-12" neste instante. Buscá-la no banco exigiria descobrir em
+   * qual dia de qual plano aquele exercício aparece, um caminho frágil
+   * para um dado que está à mão. E não é fronteira de segurança: errar
+   * aqui só piora a própria sugestão de quem errou.
+   *
+   * O catálogo, esse sim, a API monta sozinha — nele confiar no cliente
+   * seria deixá-lo dizer quais exercícios existem.
+   */
+  sets: z.number().int().min(1).max(20).default(3),
+  reps: z.string().trim().min(1).max(20).default('8-12'),
 });
 export type AdaptExerciseInput = z.infer<typeof adaptExerciseSchema>;
 
