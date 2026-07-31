@@ -26,6 +26,7 @@
     "db:migrate:cloud": "pnpm --filter @atlas/database migrate:cloud",
     "db:migrate:both": "node infra/scripts/migrate-both.mjs",
     "db:recarimbar-outbox": "node infra/scripts/recarimbar-outbox.mjs",
+    "db:resolver-email": "node infra/scripts/resolver-email-duplicado.mjs",
     "db:seed": "pnpm --filter @atlas/database seed",
     "db:studio": "pnpm --filter @atlas/database studio",
     "api:dev": "pnpm --filter @atlas/api dev",
