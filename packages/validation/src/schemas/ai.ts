@@ -17,6 +17,7 @@ export const aiTaskSchema = z.enum([
   'HYDRATION_ANALYSIS',
   'PROGRESS_ANALYSIS',
   'EXERCISE_DESCRIPTION',
+  'EXERCISE_ADAPTATION',
 ]);
 export type AiTask = z.infer<typeof aiTaskSchema>;
 
@@ -89,3 +90,64 @@ export const weeklyReportCallbackSchema = z.object({
   errorMessage: z.string().max(2000).optional(),
 });
 export type WeeklyReportCallbackInput = z.infer<typeof weeklyReportCallbackSchema>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Agente de adaptação de exercício
+//
+// O aluno está NA academia e não consegue executar o que o treino pede.
+// A entrada é curta de propósito: quem está entre séries não preenche
+// formulário. O resto do contexto (catálogo da unidade, limitações,
+// prescrição) a API busca sozinha — pedir isso ao cliente seria confiar
+// nele para dizer quais exercícios existem.
+// ─────────────────────────────────────────────────────────────────────
+
+export const exerciseAdaptationReasonSchema = z.enum([
+  'EQUIPMENT_BUSY',
+  'EQUIPMENT_MISSING',
+  'PAIN_OR_DISCOMFORT',
+  'TECHNIQUE_UNSURE',
+  'WANTS_VARIATION',
+]);
+export type ExerciseAdaptationReason = z.infer<typeof exerciseAdaptationReasonSchema>;
+
+export const adaptExerciseSchema = z.object({
+  /** Exercício do treino que precisa ser substituído. */
+  exerciseId: cuidSchema,
+  reason: exerciseAdaptationReasonSchema,
+  /** Relato livre do aluno. Curto: é digitado de pé, no celular. */
+  reasonDetail: z.string().trim().max(280).optional(),
+  /**
+   * Sessão em andamento, quando houver. Serve para a adaptação ficar
+   * registrada junto do treino que estava sendo feito.
+   */
+  workoutLogId: cuidSchema.optional(),
+});
+export type AdaptExerciseInput = z.infer<typeof adaptExerciseSchema>;
+
+/**
+ * Saída do modelo, validada antes de chegar ao aplicativo.
+ *
+ * Sem esta validação, uma resposta fora do formato quebraria a tela sem
+ * dizer por quê — o mesmo motivo pelo qual o relatório semanal valida a
+ * dele (ADR 005).
+ */
+export const exerciseAdaptationPayloadSchema = z.object({
+  alternatives: z
+    .array(
+      z.object({
+        exerciseId: cuidSchema,
+        sets: z.number().int().min(1).max(20),
+        reps: z.string().trim().min(1).max(20),
+        whyItWorks: z.string().trim().min(1).max(300),
+        executionCue: z.string().trim().max(300).optional(),
+        loadAdjustment: z.enum(['LIGHTER', 'SAME', 'HEAVIER']),
+      }),
+    )
+    // Zero alternativas é resposta válida: significa "pule este
+    // exercício", e nesse caso `skipRecommended` explica o porquê.
+    .max(3),
+  skipRecommended: z.boolean(),
+  skipRationale: z.string().trim().max(300).optional(),
+  seekProfessional: z.boolean(),
+});
+export type ExerciseAdaptationPayload = z.infer<typeof exerciseAdaptationPayloadSchema>;

@@ -16,5 +16,6 @@ export * from './factory.js';
 export * from './providers/claude.js';
 export * from './providers/openai.js';
 export * from './providers/gemini.js';
+export * from './prompts/exercise-adaptation.js';
 export * from './prompts/weekly-report.js';
 export * from './prompts/workout-suggestion.js';

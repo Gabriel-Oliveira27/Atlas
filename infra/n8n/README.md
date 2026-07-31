@@ -58,6 +58,38 @@ Dois workflows chamam rotas administrativas que estão no roadmap (Beta):
 
 - `GET /admin/users/active`
 - `GET /admin/hydration/below-goal`
+
+Enquanto elas não existem, `01` e `03` importam mas não completam.
+
+## Agente de adaptação de exercício (31/07/2026)
+
+O aluno está na academia e a máquina que o treino pede está ocupada,
+quebrada ou não existe. Prompt pronto em
+[`packages/ai/src/prompts/exercise-adaptation.ts`](../../packages/ai/src/prompts/exercise-adaptation.ts),
+com os schemas de entrada e de saída em `packages/validation/schemas/ai.ts`
+e o tipo `EXERCISE_ADAPTATION` já no enum `AiTaskType`.
+
+**Este agente não vira workflow do n8n, e é de propósito.** Ele responde
+com o aluno de pé entre séries: a chamada é síncrona, do app direto para
+a API. Pôr o n8n no caminho crítico só acrescentaria um salto de rede a
+uma resposta que precisa chegar em segundos.
+
+O papel do n8n aqui é **posterior e agregado**, e é o que justifica o
+agente existir além da conveniência:
+
+- mesmo equipamento evitado por muitos alunos na semana → sinal de
+  máquina quebrada, avisar a academia;
+- mesmo aluno relatando `PAIN_OR_DISCOMFORT` no mesmo padrão de
+  movimento, repetidas vezes → avisar o professor.
+
+Uma adaptação isolada é conveniência; o padrão delas é diagnóstico. Esse
+workflow depende de as adaptações estarem gravadas como `AiJob`, o que a
+migration `20260731120000_agente_adaptacao_exercicio` habilita.
+
+**Falta para funcionar:** o método no `AiService` e a rota
+`POST /api/ai/exercises/adapt`. O prompt, a validação da saída e o tipo
+de tarefa já estão no lugar.
+
 - `POST /notifications/send`
 
 Os workflows já estão prontos e passam a funcionar assim que as rotas
